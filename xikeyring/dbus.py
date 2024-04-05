@@ -11,6 +11,9 @@ from .dbus_sessions import create_session
 from .keyring import AccessDeniedError
 from .keyring import NotFoundError
 
+OFSP = '/org/freedesktop/secrets'
+OFSI = 'org.freedesktop.Secret'
+
 gi.require_version('Gtk', '3.0')
 
 logger = logging.getLogger(__name__)
@@ -111,7 +114,7 @@ class DBusService(BaseDBusService):
         self.session_counter = 0
 
     def ids_to_paths(self, items):
-        return [f'/org/freedesktop/secrets/collection/it/{id}' for id in items]
+        return [f'{OFSP}/collection/it/{id}' for id in items]
 
     def update_items(self, conn, *, keep=None, add=[], rm=[]):
         for id, reg_id in list(self.registered_items.items()):
@@ -123,25 +126,15 @@ class DBusService(BaseDBusService):
             if id not in self.registered_items:
                 self.registered_items[id] = self.register_object(
                     conn,
-                    f'/org/freedesktop/secrets/collection/it/{id}',
-                    'org.freedesktop.Secret.Item',
+                    f'{OFSP}/collection/it/{id}',
+                    f'{OFSI}.Item',
                 )
 
     def on_bus_acquired(self, conn, bus):
         super().on_bus_acquired(conn, bus)
-        self.register_object(
-            conn, '/org/freedesktop/secrets', 'org.freedesktop.Secret.Service'
-        )
-        self.register_object(
-            conn,
-            '/org/freedesktop/secrets/aliases/default',
-            'org.freedesktop.Secret.Collection',
-        )
-        self.register_object(
-            conn,
-            '/org/freedesktop/secrets/collection/it',
-            'org.freedesktop.Secret.Collection',
-        )
+        self.register_object(conn, OFSP, f'{OFSI}.Service')
+        self.register_object(conn, f'{OFSP}/aliases/default', f'{OFSI}.Collection')
+        self.register_object(conn, f'{OFSP}/collection/it', f'{OFSI}.Collection')
 
         items = self.keyring.list_items()
         self.update_items(conn, keep=items, add=items)
@@ -149,9 +142,9 @@ class DBusService(BaseDBusService):
     def service_open_session(self, conn, sender, path, algorithm, input):
         output, session = create_session(algorithm, input)
         self.session_counter += 1
-        session_path = f'/org/freedesktop/secrets/sessions/{self.session_counter}'
+        session_path = f'{OFSP}/sessions/{self.session_counter}'
         self.sessions[session_path] = session
-        self.register_object(conn, session_path, 'org.freedesktop.Secret.Session')
+        self.register_object(conn, session_path, f'{OFSI}.Session')
         return GLib.Variant('(vo)', (GLib.Variant('ay', output), session_path))
 
     def service_search_items(self, conn, sender, path, query):
@@ -178,12 +171,12 @@ class DBusService(BaseDBusService):
 
     def service_read_alias(self, conn, sender, path, name):
         if name == 'default':
-            return GLib.Variant('(o)', ['/org/freedesktop/secrets/collection/it'])
+            return GLib.Variant('(o)', [f'{OFSP}/collection/it'])
         else:
             return GLib.Variant('(o)', ['/'])
 
     def service_get_collections(self, conn, sender, path):
-        return GLib.Variant('ao', ['/org/freedesktop/secrets/collection/it'])
+        return GLib.Variant('ao', [f'{OFSP}/collection/it'])
 
     def collection_search_items(self, conn, sender, path, query):
         items = self.keyring.search_items(query)
@@ -194,7 +187,7 @@ class DBusService(BaseDBusService):
     ):
         session = self.sessions[secret_tuple[0]]
         secret = session.decode(secret_tuple)
-        attributes = properties.get('org.freedesktop.Secret.Item.Attributes', {})
+        attributes = properties.get(f'{OFSI}.Item.Attributes', {})
         id = None
         if replace:
             matches = self.keyring.search_items(attributes)
@@ -205,17 +198,12 @@ class DBusService(BaseDBusService):
             id = self.keyring.create_item(attributes, secret)
             self.update_items(conn, add=[id])
         # TODO: trigger signal
-        return GLib.Variant(
-            '(oo)', (f'/org/freedesktop/secrets/collection/it/{id}', '/')
-        )
+        return GLib.Variant('(oo)', (f'{OFSP}/collection/it/{id}', '/'))
 
     def collection_get_items(self, conn, sender, path):
         items = self.keyring.list_items()
         self.update_items(conn, keep=items, add=items)
-        return GLib.Variant(
-            'ao',
-            [f'/org/freedesktop/secrets/collection/it/{id}' for id in items],
-        )
+        return GLib.Variant('ao', self.ids_to_paths(items))
 
     def collection_get_label(self, conn, sender, path):
         return GLib.Variant('s', 'it')
@@ -254,7 +242,7 @@ class DBusService(BaseDBusService):
         return GLib.Variant('s', path.rsplit('/', 1)[1])
 
     def item_get_type(self, conn, sender, path):
-        return GLib.Variant('s', 'org.freedesktop.Secret.Generic')
+        return GLib.Variant('s', f'{OFSI}.Generic')
 
     def item_get_created(self, conn, sender, path):
         return GLib.Variant('t', 0)
