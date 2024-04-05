@@ -116,25 +116,59 @@ class DBusService(BaseDBusService):
     def ids_to_paths(self, items):
         return [f'{OFSP}/collection/it/{id}' for id in items]
 
-    def update_items(self, conn, *, keep=None, add=[], rm=[]):
-        for id, reg_id in list(self.registered_items.items()):
-            if id in rm or (keep is not None and id not in keep):
-                conn.unregister_object(reg_id)
-                del self.registered_items[id]
+    def update_items(self, conn, *, keep=None, add=[], rm=[], emit=True):
+        real_rm = [
+            id
+            for id, reg_id in list(self.registered_items.items())
+            if id in rm or (keep is not None and id not in keep)
+        ]
+        real_add = [id for id in add if id not in self.registered_items]
 
-        for id in add:
-            if id not in self.registered_items:
-                self.registered_items[id] = self.register_object(
-                    conn,
-                    f'{OFSP}/collection/it/{id}',
-                    f'{OFSI}.Item',
+        for id in real_rm:
+            reg_id = self.registered_items.pop(id)
+            conn.unregister_object(reg_id)
+
+        for id in real_add:
+            self.registered_items[id] = self.register_object(
+                conn, f'{OFSP}/collection/it/{id}', f'{OFSI}.Item'
+            )
+
+        if emit:
+            for id in real_rm:
+                conn.emit_signal(
+                    None,
+                    f'{OFSP}/collection/it',
+                    f'{OFSI}.Collection',
+                    'ItemDeleted',
+                    GLib.Variant('(o)', [f'{OFSP}/collection/it/{id}']),
+                )
+            for id in real_add:
+                conn.emit_signal(
+                    None,
+                    f'{OFSP}/collection/it',
+                    f'{OFSI}.Collection',
+                    'ItemCreated',
+                    GLib.Variant('(o)', [f'{OFSP}/collection/it/{id}']),
+                )
+            if real_rm or real_add:
+                items = GLib.Variant('ao', self.ids_to_paths(self.registered_items))
+                conn.emit_signal(
+                    None,
+                    f'{OFSP}/collection/it',
+                    'org.freedesktop.DBus.Properties',
+                    'PropertiesChanged',
+                    GLib.Variant(
+                        '(sa{sv}as)',
+                        (f'{OFSI}.Collection', {'Items': items}.items(), []),
+                    ),
                 )
 
-    def search_items(self, conn, query={}):
+    def search_items(self, conn, query={}, *, emit=True):
         items = self.keyring.search_items(query)
-        self.update_items(conn, add=items)
-        if not query:
-            self.update_items(conn, keep=items)
+        if query:
+            self.update_items(conn, add=items, emit=emit)
+        else:
+            self.update_items(conn, add=items, keep=items, emit=emit)
         return items
 
     def on_bus_acquired(self, conn, bus):
@@ -143,7 +177,7 @@ class DBusService(BaseDBusService):
         self.register_object(conn, f'{OFSP}/aliases/default', f'{OFSI}.Collection')
         self.register_object(conn, f'{OFSP}/collection/it', f'{OFSI}.Collection')
 
-        self.search_items(conn)
+        self.search_items(conn, emit=False)
 
     def service_open_session(self, conn, sender, path, algorithm, input):
         output, session = create_session(algorithm, input)
@@ -202,7 +236,6 @@ class DBusService(BaseDBusService):
         if not id:
             id = self.keyring.create_item(attributes, secret)
             self.update_items(conn, add=[id])
-        # TODO: trigger signal
         return GLib.Variant('(oo)', (f'{OFSP}/collection/it/{id}', '/'))
 
     def collection_get_items(self, conn, sender, path):
@@ -226,7 +259,6 @@ class DBusService(BaseDBusService):
         self.keyring.delete_item(id)
         self.update_items(conn, rm=[id])
         return GLib.Variant('(o)', ['/'])
-        # TODO: trigger signal
 
     def item_get_secret(self, conn, sender, path, session_path):
         id = int(path.rsplit('/', 1)[1], 10)
@@ -240,7 +272,6 @@ class DBusService(BaseDBusService):
         session = self.sessions[secret_tuple[0]]
         secret = session.decode(secret_tuple)
         self.keyring.update_secret(id, secret)
-        # TODO: trigger signal
 
     def item_get_label(self, conn, sender, path):
         return GLib.Variant('s', path.rsplit('/', 1)[1])
@@ -264,8 +295,25 @@ class DBusService(BaseDBusService):
 
     def item_set_attributes(self, conn, sender, path, value):
         id = int(path.rsplit('/', 1)[1], 10)
-        self.keyring.update_attributes(id, value.unpack())
-        # TODO: trigger signal
+        attributes = value.unpack()
+        self.keyring.update_attributes(id, attributes)
+
+        conn.emit_signal(
+            None,
+            f'{OFSP}/collection/it',
+            f'{OFSI}.Collection',
+            'ItemChanged',
+            GLib.Variant('(o)', [path]),
+        )
+        conn.emit_signal(
+            None,
+            path,
+            'org.freedesktop.DBus.Properties',
+            'PropertiesChanged',
+            GLib.Variant(
+                '(sa{sv}as)', (f'{OFSI}.Item', {'Attributes': attributes}, [])
+            ),
+        )
 
     def session_close(self, conn, sender, path):
         del self.sessions[path]
