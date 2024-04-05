@@ -136,7 +136,7 @@ class DBusService(BaseDBusService):
         self.register_object(conn, f'{OFSP}/aliases/default', f'{OFSI}.Collection')
         self.register_object(conn, f'{OFSP}/collection/it', f'{OFSI}.Collection')
 
-        items = self.keyring.list_items()
+        items = self.keyring.search_items()
         self.update_items(conn, keep=items, add=items)
 
     def service_open_session(self, conn, sender, path, algorithm, input):
@@ -201,7 +201,7 @@ class DBusService(BaseDBusService):
         return GLib.Variant('(oo)', (f'{OFSP}/collection/it/{id}', '/'))
 
     def collection_get_items(self, conn, sender, path):
-        items = self.keyring.list_items()
+        items = self.keyring.search_items()
         self.update_items(conn, keep=items, add=items)
         return GLib.Variant('ao', self.ids_to_paths(items))
 

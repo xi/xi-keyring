@@ -142,20 +142,16 @@ class Keyring:
             raise ValueError
         self._crypt = None
 
-    def list_items(self) -> list[int]:
-        res = self.db.execute('SELECT id FROM items')
-        return [row[0] for row in res.fetchall()]
-
-    def search_items(self, query: dict[str, str]) -> list[int]:
-        if not query:
-            return self.list_items()
+    def search_items(self, query: dict[str, str] = {}) -> list[int]:
         params = []
-        for key, value in query.items():
-            params.append(f'$.{key}')
-            params.append(value)
-        sql = 'SELECT id FROM items WHERE ' + ' AND '.join(
-            ['json_extract(attributes, ?) = ?' for _ in query]
-        )
+        sql = 'SELECT id FROM items'
+        if query:
+            for key, value in query.items():
+                params.append(f'$.{key}')
+                params.append(value)
+            sql += ' WHERE ' + ' AND '.join(
+                ['json_extract(attributes, ?) = ?' for _ in query]
+            )
         res = self.db.execute(sql, params)
         return [row[0] for row in res.fetchall()]
 
