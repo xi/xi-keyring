@@ -130,14 +130,20 @@ class DBusService(BaseDBusService):
                     f'{OFSI}.Item',
                 )
 
+    def search_items(self, conn, query={}):
+        items = self.keyring.search_items(query)
+        self.update_items(conn, add=items)
+        if not query:
+            self.update_items(conn, keep=items)
+        return items
+
     def on_bus_acquired(self, conn, bus):
         super().on_bus_acquired(conn, bus)
         self.register_object(conn, OFSP, f'{OFSI}.Service')
         self.register_object(conn, f'{OFSP}/aliases/default', f'{OFSI}.Collection')
         self.register_object(conn, f'{OFSP}/collection/it', f'{OFSI}.Collection')
 
-        items = self.keyring.search_items()
-        self.update_items(conn, keep=items, add=items)
+        self.search_items(conn)
 
     def service_open_session(self, conn, sender, path, algorithm, input):
         output, session = create_session(algorithm, input)
@@ -148,8 +154,7 @@ class DBusService(BaseDBusService):
         return GLib.Variant('(vo)', (GLib.Variant('ay', output), session_path))
 
     def service_search_items(self, conn, sender, path, query):
-        items = self.keyring.search_items(query)
-        self.update_items(conn, add=items)
+        items = self.search_items(conn, query)
         return GLib.Variant('(aoao)', (self.ids_to_paths(items), []))
 
     def service_unlock(self, conn, sender, path, objects):
@@ -179,7 +184,7 @@ class DBusService(BaseDBusService):
         return GLib.Variant('ao', [f'{OFSP}/collection/it'])
 
     def collection_search_items(self, conn, sender, path, query):
-        items = self.keyring.search_items(query)
+        items = self.search_items(conn, query)
         return GLib.Variant('(ao)', [self.ids_to_paths(items)])
 
     def collection_create_item(
@@ -190,7 +195,7 @@ class DBusService(BaseDBusService):
         attributes = properties.get(f'{OFSI}.Item.Attributes', {})
         id = None
         if replace:
-            matches = self.keyring.search_items(attributes)
+            matches = self.search_items(conn, attributes)
             if matches:
                 id = matches[0]
                 self.keyring.update_secret(id, secret)
@@ -201,8 +206,7 @@ class DBusService(BaseDBusService):
         return GLib.Variant('(oo)', (f'{OFSP}/collection/it/{id}', '/'))
 
     def collection_get_items(self, conn, sender, path):
-        items = self.keyring.search_items()
-        self.update_items(conn, keep=items, add=items)
+        items = self.search_items(conn)
         return GLib.Variant('ao', self.ids_to_paths(items))
 
     def collection_get_label(self, conn, sender, path):
