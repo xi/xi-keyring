@@ -1,5 +1,8 @@
 from .dbus import DBusService
+from .dumpable import pr_set
 from .keyring import Keyring
+
+pr_set(dumpable=False)
 
 with Keyring('keyring.db') as keyring:
     service = DBusService(keyring)
