@@ -10,6 +10,10 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from .prompt import PinentryPrompt as Prompt
 
+TRUSTED_MANAGERS = [
+    '/usr/bin/seahorse',
+]
+
 
 class AccessDeniedError(Exception):
     pass
@@ -23,6 +27,7 @@ class NotFoundError(Exception):
 class Item:
     secret: bytes
     attributes: dict[str, str]
+    exe: str
 
 
 class Crypt:
@@ -108,8 +113,8 @@ class Keyring:
         decrypted = self.crypt.decrypt(encrypted)
         raw = json.loads(decrypted)
         self.items = {
-            id: Item(base64.urlsafe_b64decode(secret), attributes)
-            for id, secret, attributes in raw
+            id: Item(base64.urlsafe_b64decode(secret), attributes, exe)
+            for id, secret, attributes, exe in raw
         }
 
     def _write(self):
@@ -118,6 +123,7 @@ class Keyring:
                 id,
                 base64.urlsafe_b64encode(item.secret).decode(),
                 item.attributes,
+                item.exe,
             )
             for id, item in self.items.items()
         ]
@@ -126,57 +132,64 @@ class Keyring:
         with open(self.path, 'wb') as fh:
             fh.write(encrypted)
 
-    def confirm_access(self) -> None:
-        if not self.prompt.confirm('Allow access to secret from keyring?'):
+    def confirm_access(self, exe: str) -> None:
+        if not self.prompt.confirm(f'Allow {exe} to access a secret from yout keyring?'):
             raise AccessDeniedError
 
-    def confirm_change(self) -> None:
-        if not self.prompt.confirm('Allow changes to keyring?'):
+    def confirm_change(self, exe: str) -> None:
+        if not self.prompt.confirm(f'Allow {exe} to make changes to your keyring?'):
             raise AccessDeniedError
 
-    def __getitem__(self, id: int) -> Item:
+    def has_access(self, exe: str, item: Item) -> bool:
+        return item.exe == exe or exe in TRUSTED_MANAGERS
+
+    def get(self, exe: str, id: int) -> Item:
         try:
-            return self.items[id]
+            item = self.items[id]
         except KeyError as e:
             raise NotFoundError from e
+        if not self.has_access(exe, item):
+            raise NotFoundError
+        return item
 
-    def search_items(self, query: dict[str, str] = {}) -> list[int]:
+    def search_items(self, exe: str, query: dict[str, str] = {}) -> list[int]:
         return [
             id for id, item in self.items.items()
-            if not query or all(
+            if self.has_access(exe, item) and all(
                 item.attributes.get(key) == value for key, value in query.items()
             )
         ]
 
-    def get_attributes(self, id: int) -> dict[str, str]:
-        return self[id].attributes
+    def get_attributes(self, exe: str, id: int) -> dict[str, str]:
+        return self.get(exe, id).attributes
 
-    def get_secret(self, id: int) -> bytes:
-        self.confirm_access()
-        return self[id].secret
+    def get_secret(self, exe: str, id: int) -> bytes:
+        item = self.get(exe, id)
+        self.confirm_access(exe)
+        return item.secret
 
-    def create_item(self, attributes: dict[str, str], secret: bytes) -> int:
+    def create_item(self, exe: str, attributes: dict[str, str], secret: bytes) -> int:
         id = max(self.items.keys(), default=0) + 1
-        self.items[id] = Item(secret, attributes)
+        self.items[id] = Item(secret, attributes, exe)
         self._write()
         return id
 
-    def update_attributes(self, id: int, attributes: dict[str, str]) -> None:
-        self.confirm_change()
-        self[id].attributes = attributes
+    def update_attributes(self, exe: str, id: int, attributes: dict[str, str]) -> None:
+        item = self.get(exe, id)
+        self.confirm_change(exe)
+        item.attributes = attributes
         self._write()
 
-    def update_secret(self, id: int, secret: bytes) -> None:
-        self.confirm_change()
-        self[id].secret = secret
+    def update_secret(self, exe: str, id: int, secret: bytes) -> None:
+        item = self.get(exe, id)
+        self.confirm_change(exe)
+        item.secret = secret
         self._write()
 
-    def delete_item(self, id: int) -> None:
-        self.confirm_change()
-        try:
-            del self.items[id]
-        except KeyError as e:
-            raise NotFoundError from e
+    def delete_item(self, exe: str, id: int) -> None:
+        self.get(exe, id)  # trigger appropriate exceptions
+        self.confirm_change(exe)
+        del self.items[id]
         self._write()
 
 

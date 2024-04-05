@@ -1,4 +1,5 @@
 import logging
+import os
 import re
 import sys
 from pathlib import Path
@@ -104,6 +105,20 @@ class BaseDBusService:
         self._call(conn, sender, path, iface, f'Set{prop}', [value], error)
         return True
 
+    def get_exe(self, conn, sender) -> str:
+        pid = conn.call_sync(
+            'org.freedesktop.DBus',
+            '/org/freedesktop/DBus',
+            'org.freedesktop.DBus',
+            'GetConnectionUnixProcessID',
+            GLib.Variant('(s)', [sender]),
+            GLib.VariantType('(u)'),
+            Gio.DBusCallFlags.NONE,
+            -1,
+            None,
+        )[0]
+        return os.readlink(f'/proc/{pid}/exe')
+
 
 class DBusService(BaseDBusService):
     def __init__(self, keyring):
@@ -163,8 +178,8 @@ class DBusService(BaseDBusService):
                     ),
                 )
 
-    def search_items(self, conn, query={}, *, emit=True):
-        items = self.keyring.search_items(query)
+    def search_items(self, exe, conn, query={}, *, emit=True):
+        items = self.keyring.search_items(exe, query)
         if query:
             self.update_items(conn, add=items, emit=emit)
         else:
@@ -186,7 +201,8 @@ class DBusService(BaseDBusService):
         return GLib.Variant('(vo)', (GLib.Variant('ay', output), session_path))
 
     def service_search_items(self, conn, sender, path, query):
-        items = self.search_items(conn, query)
+        exe = self.get_exe(conn, sender)
+        items = self.search_items(exe, conn, query)
         return GLib.Variant('(aoao)', (self.ids_to_paths(items), []))
 
     def service_unlock(self, conn, sender, path, objects):
@@ -198,10 +214,11 @@ class DBusService(BaseDBusService):
 
     def service_get_secrets(self, conn, sender, path, items, session_path):
         session = self.sessions[session_path]
+        exe = self.get_exe(conn, sender)
         result = []
         for path in items:
             id = int(path.rsplit('/', 1)[1], 10)
-            secret = self.keyring.get_secret(id)
+            secret = self.keyring.get_secret(exe, id)
             secret_tuple = session.encode(session_path, secret)
             result.append((path, secret_tuple))
         return GLib.Variant('(a{o(oayays)})', [result])
@@ -216,7 +233,8 @@ class DBusService(BaseDBusService):
         return GLib.Variant('ao', [f'{OFSP}/collection/it'])
 
     def collection_search_items(self, conn, sender, path, query):
-        items = self.search_items(conn, query)
+        exe = self.get_exe(conn, sender)
+        items = self.search_items(exe, conn, query)
         return GLib.Variant('(ao)', [self.ids_to_paths(items)])
 
     def collection_create_item(
@@ -225,19 +243,21 @@ class DBusService(BaseDBusService):
         session = self.sessions[secret_tuple[0]]
         secret = session.decode(secret_tuple)
         attributes = properties.get(f'{OFSI}.Item.Attributes', {})
+        exe = self.get_exe(conn, sender)
         id = None
         if replace:
-            matches = self.search_items(conn, attributes)
+            matches = self.search_items(exe, conn, attributes)
             if matches:
                 id = matches[0]
-                self.keyring.update_secret(id, secret)
+                self.keyring.update_secret(exe, id, secret)
         if not id:
-            id = self.keyring.create_item(attributes, secret)
+            id = self.keyring.create_item(exe, attributes, secret)
             self.update_items(conn, add=[id])
         return GLib.Variant('(oo)', (f'{OFSP}/collection/it/{id}', '/'))
 
     def collection_get_items(self, conn, sender, path):
-        items = self.search_items(conn)
+        exe = self.get_exe(conn, sender)
+        items = self.search_items(exe, conn)
         return GLib.Variant('ao', self.ids_to_paths(items))
 
     def collection_get_label(self, conn, sender, path):
@@ -254,13 +274,15 @@ class DBusService(BaseDBusService):
 
     def item_delete(self, conn, sender, path):
         id = int(path.rsplit('/', 1)[1], 10)
-        self.keyring.delete_item(id)
+        exe = self.get_exe(conn, sender)
+        self.keyring.delete_item(exe, id)
         self.update_items(conn, rm=[id])
         return GLib.Variant('(o)', ['/'])
 
     def item_get_secret(self, conn, sender, path, session_path):
         id = int(path.rsplit('/', 1)[1], 10)
-        secret = self.keyring.get_secret(id)
+        exe = self.get_exe(conn, sender)
+        secret = self.keyring.get_secret(exe, id)
         session = self.sessions[session_path]
         secret_tuple = session.encode(session_path, secret)
         return GLib.Variant('((oayays))', [secret_tuple])
@@ -269,7 +291,8 @@ class DBusService(BaseDBusService):
         id = int(path.rsplit('/', 1)[1], 10)
         session = self.sessions[secret_tuple[0]]
         secret = session.decode(secret_tuple)
-        self.keyring.update_secret(id, secret)
+        exe = self.get_exe(conn, sender)
+        self.keyring.update_secret(exe, id, secret)
 
     def item_get_label(self, conn, sender, path):
         return GLib.Variant('s', path.rsplit('/', 1)[1])
@@ -288,13 +311,15 @@ class DBusService(BaseDBusService):
 
     def item_get_attributes(self, conn, sender, path):
         id = int(path.rsplit('/', 1)[1], 10)
-        attributes = self.keyring.get_attributes(id)
+        exe = self.get_exe(conn, sender)
+        attributes = self.keyring.get_attributes(exe, id)
         return GLib.Variant('a{ss}', attributes.items())
 
     def item_set_attributes(self, conn, sender, path, value):
         id = int(path.rsplit('/', 1)[1], 10)
         attributes = value.unpack()
-        self.keyring.update_attributes(id, attributes)
+        exe = self.get_exe(conn, sender)
+        self.keyring.update_attributes(exe, id, attributes)
 
         conn.emit_signal(
             None,
