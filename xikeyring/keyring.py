@@ -1,9 +1,10 @@
 import base64
 import json
 import os
-import sqlite3
+from dataclasses import dataclass
 
 from cryptography.fernet import Fernet
+from cryptography.fernet import InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
@@ -16,6 +17,12 @@ class AccessDeniedError(Exception):
 
 class NotFoundError(Exception):
     pass
+
+
+@dataclass
+class Item:
+    secret: bytes
+    attributes: dict[str, str]
 
 
 class Crypt:
@@ -66,32 +73,58 @@ class Crypt:
 
 
 class Keyring:
-    _crypt: Crypt | None
+    items: dict[int, Item]
 
     def __init__(self, path: str):
-        self._crypt = None
-        self.db = sqlite3.connect(path)
-        os.chmod(path, 0o600)
+        self.path = path
         self.prompt = Prompt()
 
-        with self.db:
-            self.db.execute(
-                'CREATE TABLE IF NOT EXISTS items('
-                'id INTEGER PRIMARY KEY, attributes JSON, secret BLOB)'
+        if os.path.exists(self.path):
+            while True:
+                self.crypt = self._get_crypt()
+                try:
+                    self._read()
+                    break
+                except InvalidToken:
+                    pass
+        else:
+            self.items = {}
+            self.crypt = self._get_crypt()
+            self._write()
+            os.chmod(self.path, 0o600)
+
+    def _get_crypt(self):
+        # TODO: different messages for create|unlock|retry
+        password = self.prompt.get_password(
+            'An application wants access to your keyring, but it is locked'
+        )
+        if not password:
+            raise AccessDeniedError
+        return Crypt(password)
+
+    def _read(self):
+        with open(self.path, 'rb') as fh:
+            encrypted = fh.read()
+        decrypted = self.crypt.decrypt(encrypted)
+        raw = json.loads(decrypted)
+        self.items = {
+            id: Item(base64.urlsafe_b64decode(secret), attributes)
+            for id, secret, attributes in raw
+        }
+
+    def _write(self):
+        raw = [
+            (
+                id,
+                base64.urlsafe_b64encode(item.secret).decode(),
+                item.attributes,
             )
-            self.db.execute(
-                'CREATE TABLE IF NOT EXISTS meta(id INTEGER PRIMARY KEY, value BLOB)'
-            )
-
-    def close(self):
-        self._crypt = None
-        self.db.close()
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, type, value, traceback):
-        self.close()
+            for id, item in self.items.items()
+        ]
+        decrypted = json.dumps(raw).encode('utf-8')
+        encrypted = self.crypt.encrypt(decrypted)
+        with open(self.path, 'wb') as fh:
+            fh.write(encrypted)
 
     def confirm_access(self) -> None:
         if not self.prompt.confirm('Allow access to secret from keyring?'):
@@ -101,116 +134,68 @@ class Keyring:
         if not self.prompt.confirm('Allow changes to keyring?'):
             raise AccessDeniedError
 
-    @property
-    def crypt(self) -> Crypt:
-        while not self._crypt:
-            password = self.prompt.get_password(
-                'An application wants access to your keyring, but it is locked'
-            )
-            if not password:
-                raise AccessDeniedError
-            self._crypt = Crypt(password)
-            try:
-                self._validate_password()
-            except ValueError:
-                self._crypt = None
-        return self._crypt
-
-    def _validate_password(self) -> None:
-        # SECURITY: we use the same mechanism to derive encryption keys.
-        # Is this secure?
-        res = self.db.execute('SELECT value FROM meta WHERE id=1')
-        row = res.fetchone()
-        if row:
-            salt, iterations, content = self.crypt.decode(row[0])
-            if self.crypt.get_key(salt, iterations) != content:
-                raise ValueError('incorect password')
-        else:
-            iterations = 480_000
-            salt = os.urandom(32)
-            key = self.crypt.get_key(salt, iterations)
-            data = self.crypt.encode(salt, iterations, key)
-            with self.db:
-                self.db.execute('INSERT INTO meta(id, value) VALUES (1, ?)', [data])
-
-    def validate_password(self):
-        # accessing the crypt will make sure that the password is validated
-        # FIXME: not nice
-        return self.crypt
-
-    def lock(self) -> None:
-        if not self._crypt:
-            raise ValueError
-        self._crypt = None
+    def __getitem__(self, id: int) -> Item:
+        try:
+            return self.items[id]
+        except KeyError as e:
+            raise NotFoundError from e
 
     def search_items(self, query: dict[str, str] = {}) -> list[int]:
-        params = []
-        sql = 'SELECT id FROM items'
-        if query:
-            for key, value in query.items():
-                params.append(f'$.{key}')
-                params.append(value)
-            sql += ' WHERE ' + ' AND '.join(
-                ['json_extract(attributes, ?) = ?' for _ in query]
+        return [
+            id for id, item in self.items.items()
+            if not query or all(
+                item.attributes.get(key) == value for key, value in query.items()
             )
-        res = self.db.execute(sql, params)
-        return [row[0] for row in res.fetchall()]
+        ]
 
     def get_attributes(self, id: int) -> dict[str, str]:
-        res = self.db.execute('SELECT attributes FROM items WHERE id = ?', [id])
-        row = res.fetchone()
-        if not row:
-            raise NotFoundError
-        return json.loads(row[0])
+        return self[id].attributes
 
     def get_secret(self, id: int) -> bytes:
         self.confirm_access()
-        res = self.db.execute('SELECT secret FROM items WHERE id = ?', [id])
-        row = res.fetchone()
-        if not row:
-            raise NotFoundError
-        return self.crypt.decrypt(row[0])
+        return self[id].secret
 
-    def create_item(self, attributes: dict[str, str], secret: bytes):
-        self.validate_password()
-        with self.db:
-            cur = self.db.cursor()
-            cur.execute(
-                'INSERT INTO items(attributes, secret) VALUES (json(?), ?)',
-                [
-                    json.dumps(attributes),
-                    self.crypt.encrypt(secret),
-                ],
-            )
-            return cur.lastrowid
+    def create_item(self, attributes: dict[str, str], secret: bytes) -> int:
+        id = max(self.items.keys(), default=0) + 1
+        self.items[id] = Item(secret, attributes)
+        self._write()
+        return id
 
     def update_attributes(self, id: int, attributes: dict[str, str]) -> None:
         self.confirm_change()
-        self.validate_password()
-        with self.db:
-            self.db.execute(
-                'UPDATE items SET attributes=json(?) WHERE id=?',
-                [json.dumps(attributes), id],
-            )
+        self[id].attributes = attributes
+        self._write()
 
     def update_secret(self, id: int, secret: bytes) -> None:
         self.confirm_change()
-        self.validate_password()
-        with self.db:
-            self.db.execute(
-                'UPDATE items SET secret=? WHERE id=?',
-                [self.crypt.encrypt(secret), id],
-            )
+        self[id].secret = secret
+        self._write()
 
     def delete_item(self, id: int) -> None:
         self.confirm_change()
-        self.validate_password()
-        with self.db:
-            self.db.execute('DELETE FROM items WHERE id=?', [id])
+        try:
+            del self.items[id]
+        except KeyError as e:
+            raise NotFoundError from e
+        self._write()
+
+
+class KeyringProxy:
+    def __init__(self, path):
+        self.path = path
+        self.keyring = None
+
+    def lock(self):
+        self.keyring = None
+
+    def __getattr__(self, attr):
+        if self.keyring is None:
+            self.keyring = Keyring(self.path)
+        return getattr(self.keyring, attr)
 
 
 if __name__ == '__main__':
-    with Keyring('keyring.db') as k:
-        id = k.create_item({'foo': 'bar'}, b'password')
-        print(k.get_secret(id))
-        k.delete_item(id)
+    k = KeyringProxy('keyring.db')
+    id = k.create_item({'foo': 'bar'}, b'password')
+    print(k.get_secret(id))
+    k.delete_item(id)

@@ -4,7 +4,7 @@ from pathlib import Path
 
 from .dbus import DBusService
 from .dumpable import pr_set
-from .keyring import Keyring
+from .keyring import KeyringProxy
 
 
 def get_data_home():
@@ -32,6 +32,6 @@ def parse_args():
 pr_set(dumpable=False)
 
 args = parse_args()
-with Keyring(args.store) as keyring:
-    service = DBusService(keyring)
-    service.run(args.bus)
+keyring = KeyringProxy(args.store)
+service = DBusService(keyring)
+service.run(args.bus)
