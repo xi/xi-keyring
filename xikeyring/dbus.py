@@ -75,11 +75,13 @@ class BaseDBusService:
             raise GLib.Error(
                 domain=Gio.dbus_error_quark(),
                 code=Gio.DBusError.UNKNOWN_OBJECT,
+                message='not found',
             ) from e
         except AccessDeniedError as e:
             raise GLib.Error(
                 domain=Gio.dbus_error_quark(),
                 code=Gio.DBusError.ACCESS_DENIED,
+                message='access denied',
             ) from e
         except Exception as e:
             logger.exception(e)
