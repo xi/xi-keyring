@@ -71,6 +71,7 @@ class Keyring:
     def __init__(self, path: str):
         self._crypt = None
         self.db = sqlite3.connect(path)
+        os.chmod(path, 0o600)
         self.prompt = Prompt()
 
         with self.db:
