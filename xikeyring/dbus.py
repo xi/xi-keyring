@@ -177,8 +177,6 @@ class DBusService(BaseDBusService):
         self.register_object(conn, f'{OFSP}/aliases/default', f'{OFSI}.Collection')
         self.register_object(conn, f'{OFSP}/collection/it', f'{OFSI}.Collection')
 
-        self.search_items(conn, emit=False)
-
     def service_open_session(self, conn, sender, path, algorithm, input):
         output, session = create_session(algorithm, input)
         self.session_counter += 1
