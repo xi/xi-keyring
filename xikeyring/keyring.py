@@ -133,7 +133,7 @@ class Keyring:
             fh.write(encrypted)
 
     def confirm_access(self, exe: str) -> None:
-        if not self.prompt.confirm(f'Allow {exe} to access a secret from yout keyring?'):
+        if not self.prompt.confirm(f'Allow {exe} to access a secret from your keyring?'):
             raise AccessDeniedError
 
     def confirm_change(self, exe: str) -> None:
