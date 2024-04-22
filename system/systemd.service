@@ -9,5 +9,4 @@ ExecStart=/usr/bin/python3 -m xikeyring
 MemoryDenyWriteExecute=yes
 NoNewPrivileges=yes
 ProtectSystem=strict
-PrivateNetwork=yes
 PrivateTmp=yes
