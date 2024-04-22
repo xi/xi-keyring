@@ -22,6 +22,7 @@ class PinentryPrompt:
 
     def __exit__(self, *args):
         self._proc.terminate()
+        self._proc.communicate()
 
     def encode(self, s: str) -> bytes:
         result = ''
