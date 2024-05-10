@@ -79,8 +79,6 @@ class Crypt:
 
 
 class Keyring:
-    items: dict[int, Item]
-
     def __init__(self, path: str):
         self.path = path
         self.prompt = Prompt()
@@ -94,9 +92,8 @@ class Keyring:
                 except InvalidToken:
                     pass
         else:
-            self.items = {}
             self.crypt = self._get_crypt()
-            self._write()
+            self._write({})
             os.chmod(self.path, 0o600)
 
     def _get_crypt(self):
@@ -108,17 +105,17 @@ class Keyring:
             raise AccessDeniedError
         return Crypt(password)
 
-    def _read(self):
+    def _read(self) -> dict[int, Item]:
         with open(self.path, 'rb') as fh:
             encrypted = fh.read()
         decrypted = self.crypt.decrypt(encrypted)
         raw = json.loads(decrypted)
-        self.items = {
+        return {
             id: Item(base64.urlsafe_b64decode(secret), attributes, exe)
             for id, secret, attributes, exe in raw
         }
 
-    def _write(self):
+    def _write(self, items: dict[int, Item]):
         raw = [
             (
                 id,
@@ -126,7 +123,7 @@ class Keyring:
                 item.attributes,
                 item.exe,
             )
-            for id, item in self.items.items()
+            for id, item in items.items()
         ]
         decrypted = json.dumps(raw).encode('utf-8')
         encrypted = self.crypt.encrypt(decrypted)
@@ -144,9 +141,9 @@ class Keyring:
     def has_access(self, exe: str, item: Item) -> bool:
         return item.exe == exe or exe in TRUSTED_MANAGERS
 
-    def get(self, exe: str, id: int) -> Item:
+    def get(self, items: dict[int, Item], exe: str, id: int) -> Item:
         try:
-            item = self.items[id]
+            item = items[id]
         except KeyError as e:
             raise NotFoundError from e
         if not self.has_access(exe, item):
@@ -154,44 +151,51 @@ class Keyring:
         return item
 
     def search_items(self, exe: str, query: dict[str, str] = {}) -> list[int]:
+        items = self._read()
         return [
-            id for id, item in self.items.items()
+            id for id, item in items.items()
             if self.has_access(exe, item) and all(
                 item.attributes.get(key) == value for key, value in query.items()
             )
         ]
 
     def get_attributes(self, exe: str, id: int) -> dict[str, str]:
-        return self.get(exe, id).attributes
+        items = self._read()
+        return self.get(items, exe, id).attributes
 
     def get_secret(self, exe: str, id: int) -> bytes:
-        item = self.get(exe, id)
+        items = self._read()
+        item = self.get(items, exe, id)
         self.confirm_access(exe)
         return item.secret
 
     def create_item(self, exe: str, attributes: dict[str, str], secret: bytes) -> int:
-        id = max(self.items.keys(), default=0) + 1
-        self.items[id] = Item(secret, attributes, exe)
-        self._write()
+        items = self._read()
+        id = max(items.keys(), default=0) + 1
+        items[id] = Item(secret, attributes, exe)
+        self._write(items)
         return id
 
     def update_attributes(self, exe: str, id: int, attributes: dict[str, str]) -> None:
-        item = self.get(exe, id)
+        items = self._read()
+        item = self.get(items, exe, id)
         self.confirm_change(exe)
         item.attributes = attributes
-        self._write()
+        self._write(items)
 
     def update_secret(self, exe: str, id: int, secret: bytes) -> None:
-        item = self.get(exe, id)
+        items = self._read()
+        item = self.get(items, exe, id)
         self.confirm_change(exe)
         item.secret = secret
-        self._write()
+        self._write(items)
 
     def delete_item(self, exe: str, id: int) -> None:
-        self.get(exe, id)  # trigger appropriate exceptions
+        items = self._read()
+        self.get(items, exe, id)  # trigger appropriate exceptions
         self.confirm_change(exe)
-        del self.items[id]
-        self._write()
+        del items[id]
+        self._write(items)
 
 
 class KeyringProxy:
