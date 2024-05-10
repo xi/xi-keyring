@@ -37,6 +37,7 @@ for nuance here. These are some of the **ideas** I want to experiment with:
 -   Allow to configure access rules (always allow, always deny, prompt) per application
 -   Encrypt the meta data
 -   Keep the keyring locked as much as possible without impacting user comfort too much. For example, don't unlock automatically on login.
+-   Use separate namespaces for different applications, so one application can not access the secrets stored by another.
 
 **I am not claiming that this is or ever will be more secure than
 gnome-keyring.** The gnome-keyring developers are much more experienced with
