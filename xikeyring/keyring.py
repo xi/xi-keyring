@@ -8,6 +8,7 @@ from cryptography.fernet import InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
+from .kernel_keyring import KernelKey
 from .prompt import PinentryPrompt as Prompt
 
 TRUSTED_MANAGERS = [
@@ -32,7 +33,7 @@ class Item:
 
 class Crypt:
     def __init__(self, password: bytes):
-        self.password = password
+        self.password = KernelKey(password)
 
     def get_key(self, salt: bytes, iterations: int) -> bytes:
         if iterations < 100_000:
@@ -43,7 +44,7 @@ class Crypt:
             salt=salt,
             iterations=iterations,
         )
-        return base64.urlsafe_b64encode(kdf.derive(self.password))
+        return base64.urlsafe_b64encode(kdf.derive(self.password.value))
 
     def encode(self, salt: bytes, iterations: int, content: bytes) -> bytes:
         return b'$'.join(
