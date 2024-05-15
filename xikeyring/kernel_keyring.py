@@ -1,5 +1,6 @@
 import ctypes
 import os
+from weakref import finalize
 
 keyutils = ctypes.CDLL('libkeyutils.so.1')
 
@@ -29,10 +30,18 @@ def get_key(id: int, size: int) -> bytes:
     return buf.value
 
 
+def unlink_key(id: int, keyring: int):
+    result = keyutils.keyctl_unlink(id, keyring)
+    if result == -1:
+        errno = ctypes.get_errno()
+        raise OSError(errno, os.strerror(errno))
+
+
 class KernelKey:
     def __init__(self, value: bytes, keyring: int = PROCESS_KEYRING):
         name = f'kernel-key-{id(self)}'.encode()
         self.id, self.size = add_key(name, value, keyring)
+        finalize(self, unlink_key, self.id, keyring)
 
     @property
     def value(self):
