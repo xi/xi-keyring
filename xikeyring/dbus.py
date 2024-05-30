@@ -199,8 +199,29 @@ class DBusService(BaseDBusService):
         self.session_counter += 1
         session_path = f'{OFSP}/sessions/{self.session_counter}'
         sid = self.register_object(conn, session_path, f'{OFSI}.Session')
-        self.sessions[session_path] = (sid, session)
+        self.sessions[session_path] = (sid, sender, session)
+
+        conn.signal_subscribe(
+            None,
+            'org.freedesktop.DBus',
+            'NameOwnerChanged',
+            '/org/freedesktop/DBus',
+            None,
+            Gio.DBusSignalFlags.NONE,
+            self.on_name_owner_changed,
+            None
+        )
         return GLib.Variant('(vo)', (GLib.Variant('ay', output), session_path))
+
+    def on_name_owner_changed(
+        self, conn, sender, path, iface, signal, params, user_data=None
+    ):
+        _name, old, new = params.unpack()
+        if not new:
+            for path in [
+                path for path, value in self.sessions.items() if value[1] == old
+            ]:
+                self.session_close(conn, sender, path)
 
     def service_search_items(self, conn, sender, path, query):
         exe = self.get_exe(conn, sender)
@@ -215,7 +236,7 @@ class DBusService(BaseDBusService):
         return GLib.Variant('(aoo)', ([], '/'))
 
     def service_get_secrets(self, conn, sender, path, items, session_path):
-        _sid, session = self.sessions[session_path]
+        session = self.sessions[session_path][2]
         exe = self.get_exe(conn, sender)
         result = []
         for path in items:
@@ -242,7 +263,7 @@ class DBusService(BaseDBusService):
     def collection_create_item(
         self, conn, sender, path, properties, secret_tuple, replace
     ):
-        _sid, session = self.sessions[secret_tuple[0]]
+        session = self.sessions[secret_tuple[0]][2]
         secret = session.decode(secret_tuple)
         attributes = properties.get(f'{OFSI}.Item.Attributes', {})
         exe = self.get_exe(conn, sender)
@@ -285,13 +306,13 @@ class DBusService(BaseDBusService):
         id = int(path.rsplit('/', 1)[1], 10)
         exe = self.get_exe(conn, sender)
         secret = self.keyring.get_secret(exe, id)
-        _sid, session = self.sessions[session_path]
+        session = self.sessions[session_path][2]
         secret_tuple = session.encode(session_path, secret)
         return GLib.Variant('((oayays))', [secret_tuple])
 
     def item_set_secret(self, conn, sender, path, secret_tuple):
         id = int(path.rsplit('/', 1)[1], 10)
-        _sid, session = self.sessions[secret_tuple[0]]
+        session = self.sessions[secret_tuple[0]][2]
         secret = session.decode(secret_tuple)
         exe = self.get_exe(conn, sender)
         self.keyring.update_secret(exe, id, secret)
@@ -341,5 +362,5 @@ class DBusService(BaseDBusService):
         )
 
     def session_close(self, conn, sender, path):
-        sid, _session = self.sessions.pop(path)
+        sid, _owner, _session = self.sessions.pop(path)
         conn.unregister_object(sid)
