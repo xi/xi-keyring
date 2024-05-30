@@ -198,8 +198,8 @@ class DBusService(BaseDBusService):
         output, session = create_session(algorithm, input)
         self.session_counter += 1
         session_path = f'{OFSP}/sessions/{self.session_counter}'
-        self.sessions[session_path] = session
-        self.register_object(conn, session_path, f'{OFSI}.Session')
+        sid = self.register_object(conn, session_path, f'{OFSI}.Session')
+        self.sessions[session_path] = (sid, session)
         return GLib.Variant('(vo)', (GLib.Variant('ay', output), session_path))
 
     def service_search_items(self, conn, sender, path, query):
@@ -215,7 +215,7 @@ class DBusService(BaseDBusService):
         return GLib.Variant('(aoo)', ([], '/'))
 
     def service_get_secrets(self, conn, sender, path, items, session_path):
-        session = self.sessions[session_path]
+        _sid, session = self.sessions[session_path]
         exe = self.get_exe(conn, sender)
         result = []
         for path in items:
@@ -242,7 +242,7 @@ class DBusService(BaseDBusService):
     def collection_create_item(
         self, conn, sender, path, properties, secret_tuple, replace
     ):
-        session = self.sessions[secret_tuple[0]]
+        _sid, session = self.sessions[secret_tuple[0]]
         secret = session.decode(secret_tuple)
         attributes = properties.get(f'{OFSI}.Item.Attributes', {})
         exe = self.get_exe(conn, sender)
@@ -285,13 +285,13 @@ class DBusService(BaseDBusService):
         id = int(path.rsplit('/', 1)[1], 10)
         exe = self.get_exe(conn, sender)
         secret = self.keyring.get_secret(exe, id)
-        session = self.sessions[session_path]
+        _sid, session = self.sessions[session_path]
         secret_tuple = session.encode(session_path, secret)
         return GLib.Variant('((oayays))', [secret_tuple])
 
     def item_set_secret(self, conn, sender, path, secret_tuple):
         id = int(path.rsplit('/', 1)[1], 10)
-        session = self.sessions[secret_tuple[0]]
+        _sid, session = self.sessions[secret_tuple[0]]
         secret = session.decode(secret_tuple)
         exe = self.get_exe(conn, sender)
         self.keyring.update_secret(exe, id, secret)
@@ -341,4 +341,5 @@ class DBusService(BaseDBusService):
         )
 
     def session_close(self, conn, sender, path):
-        del self.sessions[path]
+        sid, _session = self.sessions.pop(path)
+        conn.unregister_object(sid)
