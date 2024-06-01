@@ -5,7 +5,7 @@ PartOf=graphical-session.target
 [Service]
 Type=dbus
 BusName=org.freedesktop.secrets
-ExecStart=/usr/bin/python3 -m xikeyring
+ExecStart=/usr/bin/python3 -I -m xikeyring
 MemoryDenyWriteExecute=yes
 NoNewPrivileges=yes
 ProtectSystem=strict
