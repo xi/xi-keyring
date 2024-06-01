@@ -46,7 +46,7 @@ class PinentryPrompt:
         raise AssertionError('unreachable')
 
     def setup(self, title: str, desc: str):
-        self.call(b'SETTITLE ' + self.encode(title))
+        self.call(b'SETTITLE ' + self.encode('keyring'))
         self.call(b'SETPROMPT ' + self.encode(title))
         self.call(b'SETDESC ' + self.encode(desc))
         self.call(b'SETQUALITYBAR')
