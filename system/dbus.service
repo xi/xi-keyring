@@ -1,4 +1,4 @@
 [D-BUS Service]
 Name=org.freedesktop.secrets
-Exec=/usr/bin/python3 xikeyring
+Exec=/bin/false
 SystemdService=xi-keyring.service
