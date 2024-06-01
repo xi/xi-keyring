@@ -165,22 +165,22 @@ class DBusService(BaseDBusService):
                     'ItemCreated',
                     GLib.Variant('(o)', [f'{OFSP}/collection/it/{id}']),
                 )
-            if real_rm or real_add:
-                items = GLib.Variant('ao', self.ids_to_paths(self.registered_items))
-                conn.emit_signal(
-                    None,
-                    f'{OFSP}/collection/it',
-                    'org.freedesktop.DBus.Properties',
-                    'PropertiesChanged',
-                    GLib.Variant(
-                        '(sa{sv}as)',
-                        (f'{OFSI}.Collection', {'Items': items}.items(), []),
-                    ),
-                )
+        if real_rm or real_add:
+            items = GLib.Variant('ao', self.ids_to_paths(self.registered_items))
+            conn.emit_signal(
+                None,
+                f'{OFSP}/collection/it',
+                'org.freedesktop.DBus.Properties',
+                'PropertiesChanged',
+                GLib.Variant(
+                    '(sa{sv}as)',
+                    (f'{OFSI}.Collection', {'Items': items}.items(), []),
+                ),
+            )
 
-    def search_items(self, exe, conn, query={}, *, emit=True):
+    def search_items(self, exe, conn, query={}):
         items = self.keyring.search_items(exe, query)
-        self.update_items(conn, add=items, emit=emit)
+        self.update_items(conn, add=items, emit=False)
         return items
 
     def on_bus_acquired(self, conn, bus):
