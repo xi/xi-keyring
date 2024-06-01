@@ -133,11 +133,9 @@ class DBusService(BaseDBusService):
     def ids_to_paths(self, items):
         return [f'{OFSP}/collection/it/{id}' for id in items]
 
-    def update_items(self, conn, *, keep=None, add=[], rm=[], emit=True):
+    def update_items(self, conn, *, add=[], rm=[], emit=True):
         real_rm = [
-            id
-            for id, reg_id in list(self.registered_items.items())
-            if id in rm or (keep is not None and id not in keep)
+            id for id, reg_id in list(self.registered_items.items()) if id in rm
         ]
         real_add = [id for id in add if id not in self.registered_items]
 
@@ -182,10 +180,7 @@ class DBusService(BaseDBusService):
 
     def search_items(self, exe, conn, query={}, *, emit=True):
         items = self.keyring.search_items(exe, query)
-        if query:
-            self.update_items(conn, add=items, emit=emit)
-        else:
-            self.update_items(conn, add=items, keep=items, emit=emit)
+        self.update_items(conn, add=items, emit=emit)
         return items
 
     def on_bus_acquired(self, conn, bus):
