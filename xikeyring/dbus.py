@@ -38,7 +38,7 @@ class BaseDBusService:
         )
 
     def on_bus_acquired(self, conn, bus, user_data=None):
-        print(f'bus {bus} acquired')
+        print(f'bus {bus} acquired', file=sys.stderr)
 
     def on_name_lost(self, conn, name, user_data=None):
         sys.exit(f'Could not aquire name {name}. Is some other service blocking it?')
