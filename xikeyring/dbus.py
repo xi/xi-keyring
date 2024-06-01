@@ -11,6 +11,7 @@ from gi.repository import GLib
 from .dbus_sessions import create_session
 from .keyring import AccessDeniedError
 from .keyring import NotFoundError
+from .prompt import PinentryPrompt as Prompt
 
 OFSP = '/org/freedesktop/secrets'
 OFSI = 'org.freedesktop.Secret'
@@ -41,7 +42,10 @@ class BaseDBusService:
         print(f'bus {bus} acquired')
 
     def on_name_lost(self, conn, name, user_data=None):
-        sys.exit(f'Could not aquire name {name}. Is some other service blocking it?')
+        msg = f'Could not aquire name {name}. Is some other service blocking it?'
+        with Prompt() as prompt:
+            prompt.confirm(msg)
+        sys.exit(msg)
 
     def run(self, name):
         handle = Gio.bus_own_name(
