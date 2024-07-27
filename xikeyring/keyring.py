@@ -28,7 +28,7 @@ class NotFoundError(Exception):
 class Item:
     secret: bytes
     attributes: dict[str, str]
-    exe: str
+    app_id: str
 
 
 class Crypt:
@@ -111,8 +111,8 @@ class Keyring:
         decrypted = self.crypt.decrypt(encrypted)
         raw = json.loads(decrypted)
         return {
-            id: Item(base64.urlsafe_b64decode(secret), attributes, exe)
-            for id, secret, attributes, exe in raw
+            id: Item(base64.urlsafe_b64decode(secret), attributes, app_id)
+            for id, secret, attributes, app_id in raw
         }
 
     def _write(self, items: dict[int, Item]):
@@ -121,7 +121,7 @@ class Keyring:
                 id,
                 base64.urlsafe_b64encode(item.secret).decode(),
                 item.attributes,
-                item.exe,
+                item.app_id,
             )
             for id, item in items.items()
         ]
@@ -130,70 +130,70 @@ class Keyring:
         with open(self.path, 'wb') as fh:
             fh.write(encrypted)
 
-    def confirm_access(self, exe: str) -> None:
-        if not self.prompt.confirm(f'Allow {exe} to access a secret from your keyring?'):
+    def confirm_access(self, app_id: str) -> None:
+        if not self.prompt.confirm(f'Allow {app_id} to access a secret from your keyring?'):
             raise AccessDeniedError
 
-    def confirm_change(self, exe: str) -> None:
-        if not self.prompt.confirm(f'Allow {exe} to make changes to your keyring?'):
+    def confirm_change(self, app_id: str) -> None:
+        if not self.prompt.confirm(f'Allow {app_id} to make changes to your keyring?'):
             raise AccessDeniedError
 
-    def has_access(self, exe: str, item: Item) -> bool:
-        return item.exe == exe or exe in TRUSTED_MANAGERS
+    def has_access(self, app_id: str, item: Item) -> bool:
+        return item.app_id == app_id or app_id in TRUSTED_MANAGERS
 
-    def get(self, items: dict[int, Item], exe: str, id: int) -> Item:
+    def get(self, items: dict[int, Item], app_id: str, id: int) -> Item:
         try:
             item = items[id]
         except KeyError as e:
             raise NotFoundError from e
-        if not self.has_access(exe, item):
+        if not self.has_access(app_id, item):
             raise NotFoundError
         return item
 
-    def search_items(self, exe: str, query: dict[str, str] = {}) -> list[int]:
+    def search_items(self, app_id: str, query: dict[str, str] = {}) -> list[int]:
         items = self._read()
         return [
             id for id, item in items.items()
-            if self.has_access(exe, item) and all(
+            if self.has_access(app_id, item) and all(
                 item.attributes.get(key) == value for key, value in query.items()
             )
         ]
 
-    def get_attributes(self, exe: str, id: int) -> dict[str, str]:
+    def get_attributes(self, app_id: str, id: int) -> dict[str, str]:
         items = self._read()
-        return self.get(items, exe, id).attributes
+        return self.get(items, app_id, id).attributes
 
-    def get_secret(self, exe: str, id: int) -> bytes:
+    def get_secret(self, app_id: str, id: int) -> bytes:
         items = self._read()
-        item = self.get(items, exe, id)
-        self.confirm_access(exe)
+        item = self.get(items, app_id, id)
+        self.confirm_access(app_id)
         return item.secret
 
-    def create_item(self, exe: str, attributes: dict[str, str], secret: bytes) -> int:
+    def create_item(self, app_id: str, attributes: dict[str, str], secret: bytes) -> int:
         items = self._read()
         id = max(items.keys(), default=0) + 1
-        items[id] = Item(secret, attributes, exe)
+        items[id] = Item(secret, attributes, app_id)
         self._write(items)
         return id
 
-    def update_attributes(self, exe: str, id: int, attributes: dict[str, str]) -> None:
+    def update_attributes(self, app_id: str, id: int, attributes: dict[str, str]) -> None:
         items = self._read()
-        item = self.get(items, exe, id)
-        self.confirm_change(exe)
+        item = self.get(items, app_id, id)
+        self.confirm_change(app_id)
         item.attributes = attributes
         self._write(items)
 
-    def update_secret(self, exe: str, id: int, secret: bytes) -> None:
+    def update_secret(self, app_id: str, id: int, secret: bytes) -> None:
         items = self._read()
-        item = self.get(items, exe, id)
-        self.confirm_change(exe)
+        item = self.get(items, app_id, id)
+        self.confirm_change(app_id)
         item.secret = secret
         self._write(items)
 
-    def delete_item(self, exe: str, id: int) -> None:
+    def delete_item(self, app_id: str, id: int) -> None:
         items = self._read()
-        self.get(items, exe, id)  # trigger appropriate exceptions
-        self.confirm_change(exe)
+        self.get(items, app_id, id)  # trigger appropriate exceptions
+        self.confirm_change(app_id)
         del items[id]
         self._write(items)
 
