@@ -8,6 +8,7 @@ import gi
 from gi.repository import Gio
 from gi.repository import GLib
 
+from .app_id import get_app_id
 from .dbus_sessions import create_session
 from .keyring import AccessDeniedError
 from .keyring import NotFoundError
@@ -123,7 +124,7 @@ class BaseDBusService:
             -1,
             None,
         )[0]
-        return os.readlink(f'/proc/{pid}/exe')
+        return get_app_id(pid)
 
 
 class DBusService(BaseDBusService):
