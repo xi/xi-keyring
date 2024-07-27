@@ -92,8 +92,12 @@ class BaseDBusService:
 
     def call(self, conn, sender, path, iface, method, params, invocation):
         try:
+            fds = invocation.get_message().get_unix_fd_list()
+            types = GLib.Variant.split_signature(params.get_type_string())
+            args = [fds.get(v) if t == 'h' else v for v, t in zip(params, types)]
+
             error = Gio.DBusError.UNKNOWN_METHOD
-            result = self._call(conn, sender, path, iface, method, params, error)
+            result = self._call(conn, sender, path, iface, method, args, error)
             invocation.return_value(result)
         except GLib.Error as e:
             invocation.return_error_literal(e.domain, e.code, e.message)
