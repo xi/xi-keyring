@@ -17,4 +17,5 @@ package() {
 	install -Dm 644 README.md "$pkgdir/usr/share/docs/xi-keyring/README.md"
 	install -Dm 644 system/dbus.service "$pkgdir/usr/share/dbus-1/services/org.xi.keyring.service"
 	install -Dm 644 system/systemd.service "$pkgdir/usr/lib/systemd/user/xi-keyring.service"
+	install -Dm 644 system/portal "$pkgdir/usr/share/xdg-desktop-portal/portals/xi-keyring.portal"
 }

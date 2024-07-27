@@ -192,6 +192,11 @@ class DBusService(BaseDBusService):
         self.register_object(conn, OFSP, f'{OFSI}.Service')
         self.register_object(conn, f'{OFSP}/aliases/default', f'{OFSI}.Collection')
         self.register_object(conn, f'{OFSP}/collection/it', f'{OFSI}.Collection')
+        self.register_object(
+            conn,
+            '/org/freedesktop/portal/desktop',
+            'org.freedesktop.impl.portal.Secret',
+        )
 
     def service_open_session(self, conn, sender, path, algorithm, input):
         output, session = create_session(algorithm, input)
@@ -363,3 +368,25 @@ class DBusService(BaseDBusService):
     def session_close(self, conn, sender, path):
         sid, _owner, _session = self.sessions.pop(path)
         conn.unregister_object(sid)
+
+    def secret_get_version(self, conn, sender, path):
+        return GLib.Variant('u', 1)
+
+    def secret_retrieve_secret(self, conn, sender, path, handle, app_id, fd, options):
+        reg_id = self.register_object(conn, handle, 'org.freedesktop.impl.portal.Request')
+        try:
+            exe = self.get_exe(conn, sender)
+            attrs = {
+                'application': 'org.freedesktop.portal.Secret',
+                'app_id': app_id,
+            }
+            ids = self.keyring.search_items(exe, attrs)
+            if ids:
+                secret = self.keyring.get_secret(exe, ids[0])
+            else:
+                secret = os.urandom(64)
+                self.keyring.create_item(exe, attrs, secret)
+            os.write(fd, secret)
+        finally:
+            conn.unregister_object(reg_id)
+        return GLib.Variant('(ua{sv})', (0, []))
