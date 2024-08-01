@@ -131,11 +131,11 @@ class Keyring:
             fh.write(encrypted)
 
     def confirm_access(self, app_id: str) -> None:
-        if not self.prompt.confirm(f'Allow {app_id} to access a secret from your keyring?'):
+        if not self.prompt.confirm(f'Allow {app_id or "host"} to access a secret from your keyring?'):
             raise AccessDeniedError
 
     def confirm_change(self, app_id: str) -> None:
-        if not self.prompt.confirm(f'Allow {app_id} to make changes to your keyring?'):
+        if not self.prompt.confirm(f'Allow {app_id or "host"} to make changes to your keyring?'):
             raise AccessDeniedError
 
     def has_access(self, app_id: str, item: Item) -> bool:
