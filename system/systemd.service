@@ -8,5 +8,3 @@ BusName=org.freedesktop.secrets
 ExecStart=/usr/bin/python3 -I -m xikeyring
 MemoryDenyWriteExecute=yes
 NoNewPrivileges=yes
-ProtectSystem=strict
-PrivateTmp=yes
