@@ -35,7 +35,7 @@ class Crypt:
     def __init__(self, password: bytes):
         self.password = KernelKey(password)
 
-    def get_key(self, salt: bytes, iterations: int) -> bytes:
+    def get_pkbf2(self, salt: bytes, iterations: int) -> bytes:
         if iterations < 100_000:
             raise ValueError('Too few iterations')
         kdf = PBKDF2HMAC(
@@ -44,37 +44,31 @@ class Crypt:
             salt=salt,
             iterations=iterations,
         )
-        return base64.urlsafe_b64encode(kdf.derive(self.password.value))
+        key = kdf.derive(self.password.value)
+        return base64.urlsafe_b64encode(key)
 
-    def encode(self, salt: bytes, iterations: int, content: bytes) -> bytes:
+    def encrypt(self, data: bytes) -> bytes:
+        salt = os.urandom(16)
+        params = [100_000]
+        key = self.get_pkbf2(salt, *params)
+        content = Fernet(key).encrypt(data)
         return b'$'.join(
             [
                 b'fernet',
                 base64.urlsafe_b64encode(salt),
-                str(iterations).encode(),
+                *[str(p).encode() for p in params],
                 content,
             ]
         )
 
-    def decode(self, data: bytes) -> tuple[bytes, int, bytes]:
-        algo, salt, iterations, content = data.split(b'$')
-        if algo != b'fernet':
-            raise TypeError('Unknown encryption algorithm')
-        return (
-            base64.urlsafe_b64decode(salt),
-            int(iterations, 10),
-            content,
-        )
-
-    def encrypt(self, data: bytes, iterations=100_000) -> bytes:
-        salt = os.urandom(16)
-        key = self.get_key(salt, iterations)
-        content = Fernet(key).encrypt(data)
-        return self.encode(salt, iterations, content)
-
     def decrypt(self, data: bytes) -> bytes:
-        salt, iterations, content = self.decode(data)
-        key = self.get_key(salt, iterations)
+        algo, salt, *params, content = data.split(b'$')
+        salt = base64.urlsafe_b64decode(salt)
+        params = [int(p, 10) for p in params]
+        if algo == b'fernet' and len(params) == 1:
+            key = self.get_pkbf2(salt, *params)
+        else:
+            raise TypeError('Unknown encryption algorithm')
         return Fernet(key).decrypt(content)
 
 
