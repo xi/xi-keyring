@@ -6,6 +6,7 @@ url='https://github.com/xi/xi-keyring'
 license='MIT'
 depends=(
 	pinentry
+	python3-argon2
 	python3-cryptography
 	python3-gi
 )

@@ -3,6 +3,7 @@ import json
 import os
 from dataclasses import dataclass
 
+import argon2
 from cryptography.fernet import Fernet
 from cryptography.fernet import InvalidToken
 from cryptography.hazmat.primitives import hashes
@@ -47,14 +48,33 @@ class Crypt:
         key = kdf.derive(self.password.value)
         return base64.urlsafe_b64encode(key)
 
+    def get_argon2(
+            self,
+            salt: bytes,
+            time_cost: int,
+            memory_cost: int,
+            parallelism: int,
+        ) -> bytes:
+        # https://www.rfc-editor.org/rfc/rfc9106.html#name-parameter-choice
+        key = argon2.low_level.hash_secret_raw(
+            secret=self.password.value,
+            salt=salt,
+            time_cost=time_cost,
+            memory_cost=memory_cost,
+            parallelism=parallelism,
+            hash_len=32,
+            type=argon2.low_level.Type.ID,
+        )
+        return base64.urlsafe_b64encode(key)
+
     def encrypt(self, data: bytes) -> bytes:
         salt = os.urandom(16)
-        params = [100_000]
-        key = self.get_pkbf2(salt, *params)
+        params = [3, 1 << 16, 4]
+        key = self.get_argon2(salt, *params)
         content = Fernet(key).encrypt(data)
         return b'$'.join(
             [
-                b'fernet',
+                b'fernet-argon2',
                 base64.urlsafe_b64encode(salt),
                 *[str(p).encode() for p in params],
                 content,
@@ -67,6 +87,8 @@ class Crypt:
         params = [int(p, 10) for p in params]
         if algo == b'fernet' and len(params) == 1:
             key = self.get_pkbf2(salt, *params)
+        elif algo == b'fernet-argon2' and len(params) == 3:
+            key = self.get_argon2(salt, *params)
         else:
             raise TypeError('Unknown encryption algorithm')
         return Fernet(key).decrypt(content)
