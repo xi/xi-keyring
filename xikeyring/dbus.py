@@ -373,14 +373,12 @@ class DBusService(BaseDBusService):
     def secret_get_version(self, conn, sender, path):
         return GLib.Variant('u', 1)
 
-    def secret_retrieve_secret(self, conn, sender, path, handle, client_app_id, fd, options):
+    def secret_retrieve_secret(self, conn, sender, path, handle, app_id, fd, options):
         reg_id = self.register_object(conn, handle, 'org.freedesktop.impl.portal.Request')
         try:
-            app_id = self.get_app_id(conn, sender)
-            attrs = {
-                'application': 'org.freedesktop.portal.Secret',
-                'app_id': client_app_id,
-            }
+            if self.get_app_id(conn, sender):
+                raise AccessDeniedError
+            attrs = {'application': 'org.freedesktop.portal.Secret'}
             ids = self.keyring.search_items(app_id, attrs)
             if ids:
                 secret = self.keyring.get_secret(app_id, ids[0])
