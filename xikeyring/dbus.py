@@ -386,6 +386,7 @@ class DBusService(BaseDBusService):
                 secret = os.urandom(64)
                 self.keyring.create_item(app_id, attrs, secret)
             os.write(fd, secret)
+            os.close(fd)
         finally:
             conn.unregister_object(reg_id)
         return GLib.Variant('(ua{sv})', (0, []))
