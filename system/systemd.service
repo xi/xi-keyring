@@ -1,10 +1,13 @@
 [Unit]
 Description=xi keyring
 PartOf=graphical-session.target
+Requires=dbus.service
+After=dbus.service
 
 [Service]
 Type=dbus
 BusName=org.freedesktop.secrets
 ExecStart=/usr/bin/python3 -I -m xikeyring
+Slice=session.slice
 MemoryDenyWriteExecute=yes
 NoNewPrivileges=yes
