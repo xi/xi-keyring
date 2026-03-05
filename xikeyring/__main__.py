@@ -18,10 +18,16 @@ def get_data_home():
 def parse_args():
     parser = argparse.ArgumentParser('xikeyring')
     parser.add_argument(
+        '--key',
+        '-k',
+        help='path to the key file',
+        default=get_data_home() / 'xi' / 'keyring' / 'key',
+    )
+    parser.add_argument(
         '--store',
         '-s',
         help='path to the store file',
-        default=get_data_home() / 'xi' / 'keyring',
+        default=get_data_home() / 'xi' / 'keyring' / 'keyring',
     )
     parser.add_argument(
         '--bus', '-b', help='bus name', default='org.freedesktop.secrets'
@@ -32,6 +38,6 @@ def parse_args():
 pr_set(dumpable=False)
 
 args = parse_args()
-keyring = KeyringProxy(args.store)
+keyring = KeyringProxy(args.key, args.store)
 service = DBusService(keyring)
 service.run(args.bus)

@@ -44,6 +44,7 @@ class Crypt:
         else:
             key = Fernet.generate_key()
             encrypted = crypto.encrypt_with_password(key, password)
+            path.parent.mkdir(parents=True, exist_ok=True)
             write_bytes(path, encrypted, 0o600)
         self.key = KernelKey(key)
 
@@ -55,29 +56,28 @@ class Crypt:
 
 
 class Keyring:
-    def __init__(self, path: Path):
-        self.path = path
+    def __init__(self, key_path: Path, store_path: Path):
+        self.path = store_path
         self.prompt = Prompt()
 
-        path.mkdir(parents=True, exist_ok=True)
         while True:
             try:
-                self.crypt = self._get_crypt()
+                self.crypt = self._get_crypt(key_path)
                 break
             except InvalidToken:
                 pass
 
-    def _get_crypt(self):
+    def _get_crypt(self, path: Path):
         # TODO: different messages for create|unlock|retry
         password = self.prompt.get_password(
             'An application wants access to your keyring, but it is locked'
         )
         if not password:
             raise AccessDeniedError
-        return Crypt(self.path / 'key', password)
+        return Crypt(path, password)
 
     def _read(self, pid: PID) -> dict[int, Item]:
-        path = pid.path(self.path / 'keyring')
+        path = pid.path(self.path)
         if not path.exists():
             return {}
 
@@ -91,7 +91,7 @@ class Keyring:
         }
 
     def _write(self, pid: PID, items: dict[int, Item]):
-        path = pid.path(self.path / 'keyring')
+        path = pid.path(self.path)
 
         # Raise an error instead of creating the directory because this
         # might be a tmpfs.
@@ -113,9 +113,8 @@ class Keyring:
         write_bytes(path, encrypted, 0o600)
 
     def is_host(self, pid: PID) -> bool:
-        host = self.path / 'keyring'
-        path = pid.path(host)
-        return path.exists() and host.exists() and path.samefile(host)
+        other = pid.path(self.path)
+        return self.path.exists() and other.exists() and self.path.samefile(other)
 
     def confirm_access(self) -> None:
         if not self.prompt.confirm('Allow access to a secret from your keyring?'):
@@ -178,8 +177,8 @@ class Keyring:
 
 
 class KeyringProxy:
-    def __init__(self, path):
-        self.path = path
+    def __init__(self, *args):
+        self.args = args
         self.keyring = None
 
     def lock(self):
@@ -187,5 +186,5 @@ class KeyringProxy:
 
     def __getattr__(self, attr):
         if self.keyring is None:
-            self.keyring = Keyring(self.path)
+            self.keyring = Keyring(*self.args)
         return getattr(self.keyring, attr)
