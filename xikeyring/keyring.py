@@ -49,12 +49,12 @@ class Crypt:
         return base64.urlsafe_b64encode(key)
 
     def get_argon2(
-            self,
-            salt: bytes,
-            time_cost: int,
-            memory_cost: int,
-            parallelism: int,
-        ) -> bytes:
+        self,
+        salt: bytes,
+        time_cost: int,
+        memory_cost: int,
+        parallelism: int,
+    ) -> bytes:
         # https://www.rfc-editor.org/rfc/rfc9106.html#name-parameter-choice
         key = argon2.low_level.hash_secret_raw(
             secret=self.password.value,
