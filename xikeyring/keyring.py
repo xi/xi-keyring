@@ -30,6 +30,15 @@ class Item:
     app_id: str
 
 
+def write_bytes(path: str, data: bytes) -> int:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    fd = os.open(path, flags, mode=0o600)
+    try:
+        return os.write(fd, data)
+    finally:
+        os.close(fd)
+
+
 class Crypt:
     def __init__(self, password: bytes):
         self.password = KernelKey(password)
@@ -94,7 +103,6 @@ class Keyring:
         else:
             self.crypt = self._get_crypt()
             self._write({})
-            os.chmod(self.path, 0o600)
 
     def _get_crypt(self):
         # TODO: different messages for create|unlock|retry
@@ -127,8 +135,7 @@ class Keyring:
         ]
         decrypted = json.dumps(raw).encode('utf-8')
         encrypted = self.crypt.encrypt(decrypted)
-        with open(self.path, 'wb') as fh:
-            fh.write(encrypted)
+        write_bytes(self.path, encrypted)
 
     def confirm_access(self, app_id: str) -> None:
         if not self.prompt.confirm(f'Allow {app_id or "host"} to access a secret from your keyring?'):
