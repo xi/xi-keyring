@@ -6,8 +6,6 @@ from dataclasses import dataclass
 import argon2
 from cryptography.fernet import Fernet
 from cryptography.fernet import InvalidToken
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from .kernel_keyring import KernelKey
 from .prompt import PinentryPrompt as Prompt
@@ -35,18 +33,6 @@ class Item:
 class Crypt:
     def __init__(self, password: bytes):
         self.password = KernelKey(password)
-
-    def get_pkbf2(self, salt: bytes, iterations: int) -> bytes:
-        if iterations < 100_000:
-            raise ValueError('Too few iterations')
-        kdf = PBKDF2HMAC(
-            algorithm=hashes.SHA256(),
-            length=32,
-            salt=salt,
-            iterations=iterations,
-        )
-        key = kdf.derive(self.password.value)
-        return base64.urlsafe_b64encode(key)
 
     def get_argon2(
         self,
@@ -85,9 +71,7 @@ class Crypt:
         algo, salt, *params, content = data.split(b'$')
         salt = base64.urlsafe_b64decode(salt)
         params = [int(p, 10) for p in params]
-        if algo == b'fernet' and len(params) == 1:
-            key = self.get_pkbf2(salt, *params)
-        elif algo == b'fernet-argon2' and len(params) == 3:
+        if algo == b'fernet-argon2' and len(params) == 3:
             key = self.get_argon2(salt, *params)
         else:
             raise TypeError('Unknown encryption algorithm')
