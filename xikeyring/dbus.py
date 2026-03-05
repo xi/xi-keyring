@@ -38,10 +38,10 @@ class BaseDBusService:
             self.set_prop,
         )
 
-    def on_bus_acquired(self, conn, bus, user_data=None):
+    def on_bus_acquired(self, conn, bus):
         print(f'bus {bus} acquired', file=sys.stderr)
 
-    def on_name_lost(self, conn, name, user_data=None):
+    def on_name_lost(self, conn, name):
         sys.exit(f'Could not aquire name {name}. Is some other service blocking it?')
 
     def run(self, name):
@@ -95,7 +95,10 @@ class BaseDBusService:
         try:
             fds = invocation.get_message().get_unix_fd_list()
             types = GLib.Variant.split_signature(params.get_type_string())
-            args = [fds.get(v) if t == 'h' else v for v, t in zip(params, types)]
+            args = [
+                fds.get(v) if t == 'h' else v
+                for v, t in zip(params, types, strict=True)
+            ]
 
             error = Gio.DBusError.UNKNOWN_METHOD
             result = self._call(conn, sender, path, iface, method, args, error)
@@ -139,9 +142,7 @@ class DBusService(BaseDBusService):
         return [f'{OFSP}/collection/it/{id}' for id in items]
 
     def update_items(self, conn, *, add=[], rm=[], emit=True):
-        real_rm = [
-            id for id, reg_id in list(self.registered_items.items()) if id in rm
-        ]
+        real_rm = [id for id, reg_id in list(self.registered_items.items()) if id in rm]
         real_add = [id for id in add if id not in self.registered_items]
 
         for id in real_rm:
@@ -214,7 +215,7 @@ class DBusService(BaseDBusService):
             None,
             Gio.DBusSignalFlags.NONE,
             self.on_name_owner_changed,
-            None
+            None,
         )
         return GLib.Variant('(vo)', (GLib.Variant('ay', output), session_path))
 
@@ -374,7 +375,9 @@ class DBusService(BaseDBusService):
         return GLib.Variant('u', 1)
 
     def secret_retrieve_secret(self, conn, sender, path, handle, app_id, fd, options):
-        reg_id = self.register_object(conn, handle, 'org.freedesktop.impl.portal.Request')
+        reg_id = self.register_object(
+            conn, handle, 'org.freedesktop.impl.portal.Request'
+        )
         try:
             if self.get_app_id(conn, sender):
                 raise AccessDeniedError

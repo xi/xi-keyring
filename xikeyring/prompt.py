@@ -64,7 +64,7 @@ class PinentryPrompt:
     def confirm(self, desc: str) -> bool:
         with self:
             self.setup('Confirmation required', desc)
-            success, resp = self.call(b'CONFIRM')
+            success, _resp = self.call(b'CONFIRM')
             return success
 
 
