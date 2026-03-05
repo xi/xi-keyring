@@ -74,8 +74,3 @@ class DummyPrompt:
 
     def confirm(self, desc):
         return True
-
-
-if __name__ == '__main__':
-    prompt = PinentryPrompt()
-    print(prompt.get_password('please enter a password'))

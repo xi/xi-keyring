@@ -226,10 +226,3 @@ class KeyringProxy:
         if self.keyring is None:
             self.keyring = Keyring(self.path)
         return getattr(self.keyring, attr)
-
-
-if __name__ == '__main__':
-    k = KeyringProxy('keyring.db')
-    id = k.create_item({'foo': 'bar'}, b'password')
-    print(k.get_secret(id))
-    k.delete_item(id)
