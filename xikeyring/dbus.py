@@ -8,10 +8,10 @@ import gi
 from gi.repository import Gio
 from gi.repository import GLib
 
-from .app_id import get_app_id
 from .dbus_sessions import create_session
 from .keyring import AccessDeniedError
 from .keyring import NotFoundError
+from .pidfd import PID
 
 OFSP = '/org/freedesktop/secrets'
 OFSI = 'org.freedesktop.Secret'
@@ -115,7 +115,7 @@ class BaseDBusService:
         self._call(conn, sender, path, iface, f'Set{prop}', [value], error)
         return True
 
-    def get_app_id(self, conn, sender) -> str:
+    def get_pid(self, conn, sender) -> PID:
         cred = conn.call_sync(
             'org.freedesktop.DBus',
             '/org/freedesktop/DBus',
@@ -127,7 +127,7 @@ class BaseDBusService:
             -1,
             None,
         )[0]
-        return get_app_id(cred['ProcessID'], cred['ProcessFD'])
+        return PID(cred['ProcessID'], cred['ProcessFD'])
 
 
 class DBusService(BaseDBusService):
@@ -184,8 +184,8 @@ class DBusService(BaseDBusService):
                 ),
             )
 
-    def search_items(self, app_id, conn, query={}):
-        items = self.keyring.search_items(app_id, query)
+    def search_items(self, pid, conn, query={}):
+        items = self.keyring.search_items(pid, query)
         self.update_items(conn, add=items, emit=False)
         return items
 
@@ -230,8 +230,8 @@ class DBusService(BaseDBusService):
                 self.session_close(conn, sender, path)
 
     def service_search_items(self, conn, sender, path, query):
-        app_id = self.get_app_id(conn, sender)
-        items = self.search_items(app_id, conn, query)
+        pid = self.get_pid(conn, sender)
+        items = self.search_items(pid, conn, query)
         return GLib.Variant('(aoao)', (self.ids_to_paths(items), []))
 
     def service_unlock(self, conn, sender, path, objects):
@@ -243,11 +243,11 @@ class DBusService(BaseDBusService):
 
     def service_get_secrets(self, conn, sender, path, items, session_path):
         session = self.sessions[session_path][2]
-        app_id = self.get_app_id(conn, sender)
+        pid = self.get_pid(conn, sender)
         result = []
         for path in items:
             id = int(path.rsplit('/', 1)[1], 10)
-            secret = self.keyring.get_secret(app_id, id)
+            secret = self.keyring.get_secret(pid, id)
             secret_tuple = session.encode(session_path, secret)
             result.append((path, secret_tuple))
         return GLib.Variant('(a{o(oayays)})', [result])
@@ -262,8 +262,8 @@ class DBusService(BaseDBusService):
         return GLib.Variant('ao', [f'{OFSP}/collection/it'])
 
     def collection_search_items(self, conn, sender, path, query):
-        app_id = self.get_app_id(conn, sender)
-        items = self.search_items(app_id, conn, query)
+        pid = self.get_pid(conn, sender)
+        items = self.search_items(pid, conn, query)
         return GLib.Variant('(ao)', [self.ids_to_paths(items)])
 
     def collection_create_item(
@@ -272,21 +272,21 @@ class DBusService(BaseDBusService):
         session = self.sessions[secret_tuple[0]][2]
         secret = session.decode(secret_tuple)
         attributes = properties.get(f'{OFSI}.Item.Attributes', {})
-        app_id = self.get_app_id(conn, sender)
+        pid = self.get_pid(conn, sender)
         id = None
         if replace:
-            matches = self.search_items(app_id, conn, attributes)
+            matches = self.search_items(pid, conn, attributes)
             if matches:
                 id = matches[0]
-                self.keyring.update_secret(app_id, id, secret)
+                self.keyring.update_secret(pid, id, secret)
         if not id:
-            id = self.keyring.create_item(app_id, attributes, secret)
+            id = self.keyring.create_item(pid, attributes, secret)
             self.update_items(conn, add=[id])
         return GLib.Variant('(oo)', (f'{OFSP}/collection/it/{id}', '/'))
 
     def collection_get_items(self, conn, sender, path):
-        app_id = self.get_app_id(conn, sender)
-        items = self.search_items(app_id, conn)
+        pid = self.get_pid(conn, sender)
+        items = self.search_items(pid, conn)
         return GLib.Variant('ao', self.ids_to_paths(items))
 
     def collection_get_label(self, conn, sender, path):
@@ -303,15 +303,15 @@ class DBusService(BaseDBusService):
 
     def item_delete(self, conn, sender, path):
         id = int(path.rsplit('/', 1)[1], 10)
-        app_id = self.get_app_id(conn, sender)
-        self.keyring.delete_item(app_id, id)
+        pid = self.get_pid(conn, sender)
+        self.keyring.delete_item(pid, id)
         self.update_items(conn, rm=[id])
         return GLib.Variant('(o)', ['/'])
 
     def item_get_secret(self, conn, sender, path, session_path):
         id = int(path.rsplit('/', 1)[1], 10)
-        app_id = self.get_app_id(conn, sender)
-        secret = self.keyring.get_secret(app_id, id)
+        pid = self.get_pid(conn, sender)
+        secret = self.keyring.get_secret(pid, id)
         session = self.sessions[session_path][2]
         secret_tuple = session.encode(session_path, secret)
         return GLib.Variant('((oayays))', [secret_tuple])
@@ -320,8 +320,8 @@ class DBusService(BaseDBusService):
         id = int(path.rsplit('/', 1)[1], 10)
         session = self.sessions[secret_tuple[0]][2]
         secret = session.decode(secret_tuple)
-        app_id = self.get_app_id(conn, sender)
-        self.keyring.update_secret(app_id, id, secret)
+        pid = self.get_pid(conn, sender)
+        self.keyring.update_secret(pid, id, secret)
 
     def item_get_label(self, conn, sender, path):
         return GLib.Variant('s', path.rsplit('/', 1)[1])
@@ -340,15 +340,15 @@ class DBusService(BaseDBusService):
 
     def item_get_attributes(self, conn, sender, path):
         id = int(path.rsplit('/', 1)[1], 10)
-        app_id = self.get_app_id(conn, sender)
-        attributes = self.keyring.get_attributes(app_id, id)
+        pid = self.get_pid(conn, sender)
+        attributes = self.keyring.get_attributes(pid, id)
         return GLib.Variant('a{ss}', attributes.items())
 
     def item_set_attributes(self, conn, sender, path, value):
         id = int(path.rsplit('/', 1)[1], 10)
         attributes = value.unpack()
-        app_id = self.get_app_id(conn, sender)
-        self.keyring.update_attributes(app_id, id, attributes)
+        pid = self.get_pid(conn, sender)
+        self.keyring.update_attributes(pid, id, attributes)
 
         conn.emit_signal(
             None,
@@ -379,15 +379,19 @@ class DBusService(BaseDBusService):
             conn, handle, 'org.freedesktop.impl.portal.Request'
         )
         try:
-            if self.get_app_id(conn, sender):
+            pid = self.get_pid(conn, sender)
+            if not self.keyring.is_host(pid):
                 raise AccessDeniedError
-            attrs = {'application': 'org.freedesktop.portal.Secret'}
-            ids = self.keyring.search_items(app_id, attrs)
+            attrs = {
+                'application': 'org.freedesktop.portal.Secret',
+                'app_id': app_id,
+            }
+            ids = self.keyring.search_items(pid, attrs)
             if ids:
-                secret = self.keyring.get_secret(app_id, ids[0])
+                secret = self.keyring.get_secret(pid, ids[0])
             else:
                 secret = os.urandom(64)
-                self.keyring.create_item(app_id, attrs, secret)
+                self.keyring.create_item(pid, attrs, secret)
             os.write(fd, secret)
             os.close(fd)
         finally:

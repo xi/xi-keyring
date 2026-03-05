@@ -9,11 +9,8 @@ from cryptography.fernet import InvalidToken
 
 from . import crypto
 from .kernel_keyring import KernelKey
+from .pidfd import PID
 from .prompt import PinentryPrompt as Prompt
-
-TRUSTED_MANAGERS = [
-    '/usr/bin/seahorse',
-]
 
 
 class AccessDeniedError(Exception):
@@ -28,7 +25,6 @@ class NotFoundError(Exception):
 class Item:
     secret: bytes
     attributes: dict[str, str]
-    app_id: str
 
 
 def write_bytes(path: str | Path, data: bytes, mode: int) -> int:
@@ -80,100 +76,105 @@ class Keyring:
             raise AccessDeniedError
         return Crypt(self.path / 'key', password)
 
-    def _read(self) -> dict[int, Item]:
-        path = self.path / 'keyring'
+    def _read(self, pid: PID) -> dict[int, Item]:
+        path = pid.path(self.path / 'keyring')
         if not path.exists():
             return {}
 
-        with open(self.path / 'keyring', 'rb') as fh:
-            encrypted = fh.read()
+        encrypted = path.read_bytes()
+        pid.check_active()
         decrypted = self.crypt.decrypt(encrypted)
         raw = json.loads(decrypted)
         return {
-            id: Item(base64.urlsafe_b64decode(secret), attributes, app_id)
-            for id, secret, attributes, app_id in raw
+            id: Item(base64.urlsafe_b64decode(secret), attributes)
+            for id, secret, attributes in raw
         }
 
-    def _write(self, items: dict[int, Item]):
+    def _write(self, pid: PID, items: dict[int, Item]):
+        path = pid.path(self.path / 'keyring')
+
+        # Raise an error instead of creating the directory because this
+        # might be a tmpfs.
+        if not path.parent.exists():
+            raise NotFoundError
+
         raw = [
             (
                 id,
                 base64.urlsafe_b64encode(item.secret).decode(),
                 item.attributes,
-                item.app_id,
             )
             for id, item in items.items()
         ]
         decrypted = json.dumps(raw).encode('utf-8')
         encrypted = self.crypt.encrypt(decrypted)
-        write_bytes(self.path / 'keyring', encrypted, 0o600)
+        # FIXME: there is a small window for race conditions
+        pid.check_active()
+        write_bytes(path, encrypted, 0o600)
 
-    def confirm_access(self, app_id: str) -> None:
-        if not self.prompt.confirm(f'Allow {app_id or "host"} to access a secret from your keyring?'):
+    def is_host(self, pid: PID) -> bool:
+        host = self.path / 'keyring'
+        path = pid.path(host)
+        return path.exists() and host.exists() and path.samefile(host)
+
+    def confirm_access(self) -> None:
+        if not self.prompt.confirm('Allow access to a secret from your keyring?'):
             raise AccessDeniedError
 
-    def confirm_change(self, app_id: str) -> None:
-        if not self.prompt.confirm(f'Allow {app_id or "host"} to make changes to your keyring?'):
+    def confirm_change(self) -> None:
+        if not self.prompt.confirm('Allow changes to your keyring?'):
             raise AccessDeniedError
 
-    def has_access(self, app_id: str, item: Item) -> bool:
-        return item.app_id == app_id or app_id in TRUSTED_MANAGERS
-
-    def get(self, items: dict[int, Item], app_id: str, id: int) -> Item:
+    def get(self, items: dict[int, Item], id: int) -> Item:
         try:
-            item = items[id]
+            return items[id]
         except KeyError as e:
             raise NotFoundError from e
-        if not self.has_access(app_id, item):
-            raise NotFoundError
-        return item
 
-    def search_items(self, app_id: str, query: dict[str, str] = {}) -> list[int]:
-        items = self._read()
+    def search_items(self, pid: PID, query: dict[str, str] = {}) -> list[int]:
+        items = self._read(pid)
         return [
             id for id, item in items.items()
-            if self.has_access(app_id, item) and all(
-                item.attributes.get(key) == value for key, value in query.items()
-            )
+            if all(item.attributes.get(k) == v for k, v in query.items())
         ]
 
-    def get_attributes(self, app_id: str, id: int) -> dict[str, str]:
-        items = self._read()
-        return self.get(items, app_id, id).attributes
+    def get_attributes(self, pid: PID, id: int) -> dict[str, str]:
+        items = self._read(pid)
+        return self.get(items, id).attributes
 
-    def get_secret(self, app_id: str, id: int) -> bytes:
-        items = self._read()
-        item = self.get(items, app_id, id)
-        self.confirm_access(app_id)
+    def get_secret(self, pid: PID, id: int) -> bytes:
+        items = self._read(pid)
+        item = self.get(items, id)
+        self.confirm_access()
         return item.secret
 
-    def create_item(self, app_id: str, attributes: dict[str, str], secret: bytes) -> int:
-        items = self._read()
+    def create_item(self, pid: PID, attributes: dict[str, str], secret: bytes) -> int:
+        items = self._read(pid)
         id = max(items.keys(), default=0) + 1
-        items[id] = Item(secret, attributes, app_id)
-        self._write(items)
+        items[id] = Item(secret, attributes)
+        self._write(pid, items)
         return id
 
-    def update_attributes(self, app_id: str, id: int, attributes: dict[str, str]) -> None:
-        items = self._read()
-        item = self.get(items, app_id, id)
-        self.confirm_change(app_id)
+    def update_attributes(self, pid: PID, id: int, attributes: dict[str, str]) -> None:
+        items = self._read(pid)
+        item = self.get(items, id)
+        self.confirm_change()
         item.attributes = attributes
-        self._write(items)
+        self._write(pid, items)
 
-    def update_secret(self, app_id: str, id: int, secret: bytes) -> None:
-        items = self._read()
-        item = self.get(items, app_id, id)
-        self.confirm_change(app_id)
+    def update_secret(self, pid: PID, id: int, secret: bytes) -> None:
+        items = self._read(pid)
+        item = self.get(items, id)
+        self.confirm_change()
         item.secret = secret
-        self._write(items)
+        self._write(pid, items)
 
-    def delete_item(self, app_id: str, id: int) -> None:
-        items = self._read()
-        self.get(items, app_id, id)  # trigger appropriate exceptions
-        self.confirm_change(app_id)
+    def delete_item(self, pid: PID, id: int) -> None:
+        items = self._read(pid)
+        self.get(items, id)  # trigger appropriate exceptions
+        self.confirm_change()
         del items[id]
-        self._write(items)
+        self._write(pid, items)
 
 
 class KeyringProxy:
