@@ -18,6 +18,12 @@ def get_data_home():
 def parse_args():
     parser = argparse.ArgumentParser('xikeyring')
     parser.add_argument(
+        '--decrypt',
+        '-d',
+        help='print the decryted file and exit',
+        action='store_true',
+    )
+    parser.add_argument(
         '--key',
         '-k',
         help='path to the key file',
@@ -39,5 +45,10 @@ pr_set(dumpable=False)
 
 args = parse_args()
 keyring = KeyringProxy(args.key, args.store)
-service = DBusService(keyring)
-service.run(args.bus)
+if args.decrypt:
+    encrypted = keyring.path.read_bytes()
+    decrypted = keyring.crypt.decrypt(encrypted)
+    print(decrypted.decode('utf-8'))
+else:
+    service = DBusService(keyring)
+    service.run(args.bus)
