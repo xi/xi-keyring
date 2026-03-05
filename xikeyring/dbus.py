@@ -113,18 +113,18 @@ class BaseDBusService:
         return True
 
     def get_app_id(self, conn, sender) -> str:
-        pid = conn.call_sync(
+        cred = conn.call_sync(
             'org.freedesktop.DBus',
             '/org/freedesktop/DBus',
             'org.freedesktop.DBus',
-            'GetConnectionUnixProcessID',
+            'GetConnectionCredentials',
             GLib.Variant('(s)', [sender]),
-            GLib.VariantType('(u)'),
+            GLib.VariantType('(a{sv})'),
             Gio.DBusCallFlags.NONE,
             -1,
             None,
         )[0]
-        return get_app_id(pid)
+        return get_app_id(cred['ProcessID'], cred['ProcessFD'])
 
 
 class DBusService(BaseDBusService):
