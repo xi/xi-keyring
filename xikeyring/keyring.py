@@ -2,6 +2,7 @@ import base64
 import json
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 import argon2
 from cryptography.fernet import Fernet
@@ -30,12 +31,29 @@ class Item:
     app_id: str
 
 
+def write_bytes(path: str | Path, data: bytes, mode: int) -> int:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    fd = os.open(path, flags, mode=mode)
+    try:
+        return os.write(fd, data)
+    finally:
+        os.close(fd)
+
+
 class Crypt:
-    def __init__(self, password: bytes):
-        self.password = KernelKey(password)
+    def __init__(self, path: Path, password: bytes):
+        if path.exists():
+            encrypted = path.read_bytes()
+            key = self.decrypt_with_password(encrypted, password)
+        else:
+            key = Fernet.generate_key()
+            encrypted = self.encrypt_with_password(key, password)
+            write_bytes(path, encrypted, 0o600)
+        self.key = KernelKey(key)
 
     def get_argon2(
         self,
+        password: bytes,
         salt: bytes,
         time_cost: int,
         memory_cost: int,
@@ -43,7 +61,7 @@ class Crypt:
     ) -> bytes:
         # https://www.rfc-editor.org/rfc/rfc9106.html#name-parameter-choice
         key = argon2.low_level.hash_secret_raw(
-            secret=self.password.value,
+            secret=password,
             salt=salt,
             time_cost=time_cost,
             memory_cost=memory_cost,
@@ -53,10 +71,10 @@ class Crypt:
         )
         return base64.urlsafe_b64encode(key)
 
-    def encrypt(self, data: bytes) -> bytes:
+    def encrypt_with_password(self, data: bytes, password: bytes) -> bytes:
         salt = os.urandom(16)
         params = [3, 1 << 16, 4]
-        key = self.get_argon2(salt, *params)
+        key = self.get_argon2(password, salt, *params)
         content = Fernet(key).encrypt(data)
         return b'$'.join(
             [
@@ -67,34 +85,35 @@ class Crypt:
             ]
         )
 
-    def decrypt(self, data: bytes) -> bytes:
+    def decrypt_with_password(self, data: bytes, password: bytes) -> bytes:
         algo, salt, *params, content = data.split(b'$')
         salt = base64.urlsafe_b64decode(salt)
         params = [int(p, 10) for p in params]
         if algo == b'fernet-argon2' and len(params) == 3:
-            key = self.get_argon2(salt, *params)
+            key = self.get_argon2(password, salt, *params)
         else:
             raise TypeError('Unknown encryption algorithm')
         return Fernet(key).decrypt(content)
 
+    def encrypt(self, data: bytes) -> bytes:
+        return Fernet(self.key.value).encrypt(data)
+
+    def decrypt(self, data: bytes) -> bytes:
+        return Fernet(self.key.value).decrypt(data)
+
 
 class Keyring:
-    def __init__(self, path: str):
+    def __init__(self, path: Path):
         self.path = path
         self.prompt = Prompt()
 
-        if os.path.exists(self.path):
-            while True:
+        path.mkdir(parents=True, exist_ok=True)
+        while True:
+            try:
                 self.crypt = self._get_crypt()
-                try:
-                    self._read()
-                    break
-                except InvalidToken:
-                    pass
-        else:
-            self.crypt = self._get_crypt()
-            self._write({})
-            os.chmod(self.path, 0o600)
+                break
+            except InvalidToken:
+                pass
 
     def _get_crypt(self):
         # TODO: different messages for create|unlock|retry
@@ -103,10 +122,14 @@ class Keyring:
         )
         if not password:
             raise AccessDeniedError
-        return Crypt(password)
+        return Crypt(self.path / 'key', password)
 
     def _read(self) -> dict[int, Item]:
-        with open(self.path, 'rb') as fh:
+        path = self.path / 'keyring'
+        if not path.exists():
+            return {}
+
+        with open(self.path / 'keyring', 'rb') as fh:
             encrypted = fh.read()
         decrypted = self.crypt.decrypt(encrypted)
         raw = json.loads(decrypted)
@@ -127,8 +150,7 @@ class Keyring:
         ]
         decrypted = json.dumps(raw).encode('utf-8')
         encrypted = self.crypt.encrypt(decrypted)
-        with open(self.path, 'wb') as fh:
-            fh.write(encrypted)
+        write_bytes(self.path / 'keyring', encrypted, 0o600)
 
     def confirm_access(self, app_id: str) -> None:
         if not self.prompt.confirm(f'Allow {app_id or "host"} to access a secret from your keyring?'):

@@ -21,7 +21,7 @@ def parse_args():
         '--store',
         '-s',
         help='path to the store file',
-        default=get_data_home() / 'xikeyring.db',
+        default=get_data_home() / 'xi' / 'keyring',
     )
     parser.add_argument(
         '--bus', '-b', help='bus name', default='org.freedesktop.secrets'
