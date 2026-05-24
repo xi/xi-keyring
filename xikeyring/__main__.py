@@ -5,6 +5,7 @@ from pathlib import Path
 
 from cryptography.fernet import Fernet
 
+from . import crypto
 from .dbus import DBusService
 from .dumpable import pr_set
 from .keyring import KeyringProxy
@@ -23,7 +24,7 @@ def parse_args():
     parser = argparse.ArgumentParser('xikeyring')
     parser.add_argument(
         'action',
-        choices=['dump', 'restore'],
+        choices=['dump', 'restore', 'change-password'],
         nargs='?',
     )
     parser.add_argument(
@@ -58,6 +59,10 @@ elif args.action == 'restore':
     decrypted = sys.stdin.read().encode('utf-8')
     encrypted = Fernet(keyring.key.value).encrypt(decrypted)
     write_bytes(keyring.path, encrypted)
+elif args.action == 'change-password':
+    password = keyring._get_new_password()
+    encrypted = crypto.encrypt_with_password(keyring.key.value, password)
+    write_bytes(args.key, encrypted)
 else:
     service = DBusService(keyring)
     service.run(args.bus)

@@ -63,6 +63,14 @@ class Keyring:
                 pass
 
     def _create_key(self, path: Path) -> KernelKey:
+        password = self._get_new_password()
+        key = Fernet.generate_key()
+        encrypted = crypto.encrypt_with_password(key, password)
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        write_bytes(path, encrypted)
+        return KernelKey(key)
+
+    def _get_new_password(self):
         while True:
             password = self.prompt.get_password(
                 'An application wants access to your keyring. '
@@ -75,19 +83,13 @@ class Keyring:
                 'Please enter the password again for confirmation.'
             )
             if password == password2:
-                break
+                return password
 
             again = self.prompt.confirm(
                 'The passwords did not match. Do you want to try again?'
             )
             if not again:
                 raise AccessDeniedError
-
-        key = Fernet.generate_key()
-        encrypted = crypto.encrypt_with_password(key, password)
-        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        write_bytes(path, encrypted)
-        return KernelKey(key)
 
     def _read(self, pid: PID) -> dict[int, Item]:
         path = pid.path(self.path)
