@@ -9,6 +9,7 @@ from cryptography.fernet import InvalidToken
 
 from . import crypto
 from .kernel_keyring import KernelKey
+from .pidfd import PID
 from .prompt import PinentryPrompt as Prompt
 
 
@@ -86,7 +87,7 @@ class Keyring:
         write_bytes(path, encrypted)
         return KernelKey(key)
 
-    def _read(self) -> dict[int, Item]:
+    def _read(self, pid: PID) -> dict[int, Item]:
         if not self.path.exists():
             return {}
 
@@ -98,7 +99,7 @@ class Keyring:
             for id, secret, attributes in raw
         }
 
-    def _write(self, items: dict[int, Item]):
+    def _write(self, pid: PID, items: dict[int, Item]):
         raw = [
             (
                 id,
@@ -125,50 +126,50 @@ class Keyring:
         except KeyError as e:
             raise NotFoundError from e
 
-    def search_items(self, app_id: str, query: dict[str, str] = {}) -> list[int]:
-        items = self._read()
+    def search_items(self, pid: PID, query: dict[str, str] = {}) -> list[int]:
+        items = self._read(pid)
         return [
             id for id, item in items.items()
             if all(item.attributes.get(k) == v for k, v in query.items())
         ]
 
-    def get_attributes(self, app_id: str, id: int) -> dict[str, str]:
-        items = self._read()
-        return self.get(items, app_id, id).attributes
+    def get_attributes(self, pid: PID, id: int) -> dict[str, str]:
+        items = self._read(pid)
+        return self.get(items, id).attributes
 
-    def get_secret(self, app_id: str, id: int) -> bytes:
-        items = self._read()
+    def get_secret(self, pid: PID, id: int) -> bytes:
+        items = self._read(pid)
         item = self.get(items, id)
         self.confirm_access()
         return item.secret
 
-    def create_item(self, app_id: str, attributes: dict[str, str], secret: bytes) -> int:
-        items = self._read()
+    def create_item(self, pid: PID, attributes: dict[str, str], secret: bytes) -> int:
+        items = self._read(pid)
         id = max(items.keys(), default=0) + 1
-        items[id] = Item(secret, attributes, app_id)
-        self._write(items)
+        items[id] = Item(secret, attributes)
+        self._write(pid, items)
         return id
 
-    def update_attributes(self, app_id: str, id: int, attributes: dict[str, str]) -> None:
-        items = self._read()
+    def update_attributes(self, pid: PID, id: int, attributes: dict[str, str]) -> None:
+        items = self._read(pid)
         item = self.get(items, id)
         self.confirm_change()
         item.attributes = attributes
-        self._write(items)
+        self._write(pid, items)
 
-    def update_secret(self, app_id: str, id: int, secret: bytes) -> None:
-        items = self._read()
+    def update_secret(self, pid: PID, id: int, secret: bytes) -> None:
+        items = self._read(pid)
         item = self.get(items, id)
         self.confirm_change()
         item.secret = secret
-        self._write(items)
+        self._write(pid, items)
 
-    def delete_item(self, app_id: str, id: int) -> None:
-        items = self._read()
-        self.get(items, app_id, id)  # trigger appropriate exceptions
+    def delete_item(self, pid: PID, id: int) -> None:
+        items = self._read(pid)
+        self.get(items, id)  # trigger appropriate exceptions
         self.confirm_change()
         del items[id]
-        self._write(items)
+        self._write(pid, items)
 
 
 class KeyringProxy:
