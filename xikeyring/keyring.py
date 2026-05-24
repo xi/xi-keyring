@@ -4,10 +4,9 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-import argon2
-from cryptography.fernet import Fernet
 from cryptography.fernet import InvalidToken
 
+from . import crypto
 from .kernel_keyring import KernelKey
 from .prompt import PinentryPrompt as Prompt
 
@@ -40,54 +39,6 @@ def write_bytes(path: Path, data: bytes) -> int:
         os.close(fd)
 
 
-class Crypt:
-    def __init__(self, password: bytes):
-        self.password = KernelKey(password)
-
-    def get_argon2(
-        self,
-        salt: bytes,
-        time_cost: int,
-        memory_cost: int,
-        parallelism: int,
-    ) -> bytes:
-        # https://www.rfc-editor.org/rfc/rfc9106.html#name-parameter-choice
-        key = argon2.low_level.hash_secret_raw(
-            secret=self.password.value,
-            salt=salt,
-            time_cost=time_cost,
-            memory_cost=memory_cost,
-            parallelism=parallelism,
-            hash_len=32,
-            type=argon2.low_level.Type.ID,
-        )
-        return base64.urlsafe_b64encode(key)
-
-    def encrypt(self, data: bytes) -> bytes:
-        salt = os.urandom(16)
-        params = [3, 1 << 16, 4]
-        key = self.get_argon2(salt, *params)
-        content = Fernet(key).encrypt(data)
-        return b'$'.join(
-            [
-                b'fernet-argon2',
-                base64.urlsafe_b64encode(salt),
-                *[str(p).encode() for p in params],
-                content,
-            ]
-        )
-
-    def decrypt(self, data: bytes) -> bytes:
-        algo, salt, *params, content = data.split(b'$')
-        salt = base64.urlsafe_b64decode(salt)
-        params = [int(p, 10) for p in params]
-        if algo == b'fernet-argon2' and len(params) == 3:
-            key = self.get_argon2(salt, *params)
-        else:
-            raise TypeError('Unknown encryption algorithm')
-        return Fernet(key).decrypt(content)
-
-
 class Keyring:
     def __init__(self, path: Path):
         self.path = path
@@ -95,28 +46,28 @@ class Keyring:
 
         if self.path.exists():
             while True:
-                self.crypt = self._get_crypt()
+                self.password = self._get_password()
                 try:
                     self._read()
                     break
                 except InvalidToken:
                     pass
         else:
-            self.crypt = self._get_crypt()
+            self.password = self._get_password()
             self._write({})
 
-    def _get_crypt(self):
+    def _get_password(self):
         # TODO: different messages for create|unlock|retry
         password = self.prompt.get_password(
             'An application wants access to your keyring, but it is locked'
         )
         if not password:
             raise AccessDeniedError
-        return Crypt(password)
+        return KernelKey(password)
 
     def _read(self) -> dict[int, Item]:
         encrypted = self.path.read_bytes()
-        decrypted = self.crypt.decrypt(encrypted)
+        decrypted = crypto.decrypt_with_password(encrypted, self.password.value)
         raw = json.loads(decrypted)
         return {
             id: Item(base64.urlsafe_b64decode(secret), attributes, app_id)
@@ -134,7 +85,7 @@ class Keyring:
             for id, item in items.items()
         ]
         decrypted = json.dumps(raw).encode('utf-8')
-        encrypted = self.crypt.encrypt(decrypted)
+        encrypted = crypto.encrypt_with_password(decrypted, self.password.value)
         write_bytes(self.path, encrypted)
 
     def confirm_access(self, app_id: str) -> None:

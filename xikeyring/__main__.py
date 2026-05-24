@@ -3,6 +3,7 @@ import os
 import sys
 from pathlib import Path
 
+from . import crypto
 from .dbus import DBusService
 from .dumpable import pr_set
 from .keyring import KeyringProxy
@@ -48,11 +49,11 @@ args = parse_args()
 keyring = KeyringProxy(args.store)
 if args.dump:
     encrypted = keyring.path.read_bytes()
-    decrypted = keyring.crypt.decrypt(encrypted)
+    decrypted = crypto.decrypt_with_password(encrypted, keyring.password.value)
     print(decrypted.decode('utf-8'))
 elif args.restore:
     decrypted = sys.stdin.read().encode('utf-8')
-    encrypted = keyring.crypt.encrypt(decrypted)
+    encrypted = crypto.encrypt_with_password(decrypted, keyring.password.value)
     write_bytes(keyring.path, encrypted)
 else:
     service = DBusService(keyring)
