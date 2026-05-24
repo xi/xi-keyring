@@ -2,6 +2,7 @@ import logging
 import os
 import re
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 import gi
@@ -44,7 +45,8 @@ class BaseDBusService:
     def on_name_lost(self, conn, name):
         sys.exit(f'Could not aquire name {name}. Is some other service blocking it?')
 
-    def run(self, name):
+    @contextmanager
+    def own(self, name):
         handle = Gio.bus_own_name(
             Gio.BusType.SESSION,
             name,
@@ -53,10 +55,8 @@ class BaseDBusService:
             None,
             self.on_name_lost,
         )
-
         try:
-            loop = GLib.MainLoop()
-            loop.run()
+            yield
         finally:
             Gio.bus_unown_name(handle)
 

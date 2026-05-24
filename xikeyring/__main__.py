@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 from cryptography.fernet import Fernet
+from gi.repository import GLib
 
 from . import crypto
 from .dbus import DBusService
@@ -64,5 +65,6 @@ elif args.action == 'change-password':
     encrypted = crypto.encrypt_with_password(keyring.key.value, password)
     write_bytes(args.key, encrypted)
 else:
-    service = DBusService(keyring)
-    service.run(args.bus)
+    with DBusService(keyring).own(args.bus):
+        loop = GLib.MainLoop()
+        loop.run()
