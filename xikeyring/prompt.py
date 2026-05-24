@@ -11,6 +11,7 @@ class PinentryPrompt:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
+        assert self._proc.stdout
         resp = self._proc.stdout.readline()
         assert resp.startswith(b'OK')
 
@@ -34,6 +35,8 @@ class PinentryPrompt:
         return result.encode()
 
     def call(self, cmd: bytes) -> tuple[bool, list[bytes]]:
+        assert self._proc.stdin
+        assert self._proc.stdout
         self._proc.stdin.write(cmd + b'\n')
         self._proc.stdin.flush()
         resp = []
