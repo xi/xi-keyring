@@ -380,8 +380,6 @@ class DBusService(BaseDBusService):
             conn, handle, 'org.freedesktop.impl.portal.Request'
         )
         try:
-            if self.get_app_id(conn, sender):
-                raise AccessDeniedError
             attrs = {
                 'application': 'org.freedesktop.portal.Secret',
                 'app_id': app_id,

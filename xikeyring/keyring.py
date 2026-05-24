@@ -24,7 +24,6 @@ class NotFoundError(Exception):
 class Item:
     secret: bytes
     attributes: dict[str, str]
-    app_id: str
 
 
 def write_bytes(path: Path, data: bytes) -> int:
@@ -95,8 +94,8 @@ class Keyring:
         decrypted = Fernet(self.key.value).decrypt(encrypted)
         raw = json.loads(decrypted)
         return {
-            id: Item(base64.urlsafe_b64decode(secret), attributes, app_id)
-            for id, secret, attributes, app_id in raw
+            id: Item(base64.urlsafe_b64decode(secret), attributes)
+            for id, secret, attributes in raw
         }
 
     def _write(self, items: dict[int, Item]):
@@ -105,7 +104,6 @@ class Keyring:
                 id,
                 base64.urlsafe_b64encode(item.secret).decode(),
                 item.attributes,
-                item.app_id,
             )
             for id, item in items.items()
         ]
@@ -121,22 +119,17 @@ class Keyring:
         if not self.prompt.confirm('Allow changes to your keyring?'):
             raise AccessDeniedError
 
-    def get(self, items: dict[int, Item], app_id: str, id: int) -> Item:
+    def get(self, items: dict[int, Item], id: int) -> Item:
         try:
-            item = items[id]
+            return items[id]
         except KeyError as e:
             raise NotFoundError from e
-        if item.app_id != app_id:
-            raise NotFoundError
-        return item
 
     def search_items(self, app_id: str, query: dict[str, str] = {}) -> list[int]:
         items = self._read()
         return [
             id for id, item in items.items()
-            if item.app_id == app_id and all(
-                item.attributes.get(key) == value for key, value in query.items()
-            )
+            if all(item.attributes.get(k) == v for k, v in query.items())
         ]
 
     def get_attributes(self, app_id: str, id: int) -> dict[str, str]:
@@ -145,7 +138,7 @@ class Keyring:
 
     def get_secret(self, app_id: str, id: int) -> bytes:
         items = self._read()
-        item = self.get(items, app_id, id)
+        item = self.get(items, id)
         self.confirm_access()
         return item.secret
 
@@ -158,14 +151,14 @@ class Keyring:
 
     def update_attributes(self, app_id: str, id: int, attributes: dict[str, str]) -> None:
         items = self._read()
-        item = self.get(items, app_id, id)
+        item = self.get(items, id)
         self.confirm_change()
         item.attributes = attributes
         self._write(items)
 
     def update_secret(self, app_id: str, id: int, secret: bytes) -> None:
         items = self._read()
-        item = self.get(items, app_id, id)
+        item = self.get(items, id)
         self.confirm_change()
         item.secret = secret
         self._write(items)
