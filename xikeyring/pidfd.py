@@ -1,11 +1,27 @@
 import selectors
+import socket
+import struct
 from pathlib import Path
+
+try:
+    SO_PEERPIDFD = socket.SO_PEERPIDFD
+except AttributeError:
+    SO_PEERPIDFD = 77
 
 
 class PID:
     def __init__(self, pid: int, pidfd: int):
         self.pid = pid
         self.pidfd = pidfd
+
+    @classmethod
+    def from_socket(cls, sock: socket.socket) -> 'PID':
+        cred = sock.getsockopt(
+            socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize('3i')
+        )
+        pid, _uid, _gid = struct.unpack('3i', cred)
+        pidfd = sock.getsockopt(socket.SOL_SOCKET, SO_PEERPIDFD)
+        return cls(pid, pidfd)
 
     def check_active(self) -> None:
         with selectors.DefaultSelector() as sel:

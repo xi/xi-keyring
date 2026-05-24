@@ -1,6 +1,7 @@
 [Unit]
 Description=xi keyring
 PartOf=graphical-session.target
+Requires=xi-keyring.socket
 Requires=dbus.service
 After=dbus.service
 

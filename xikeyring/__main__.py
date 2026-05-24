@@ -11,6 +11,7 @@ from .dbus import DBusService
 from .dumpable import pr_set
 from .keyring import KeyringProxy
 from .keyring import write_bytes
+from .socket_service import SocketService
 
 
 def get_data_home():
@@ -45,6 +46,12 @@ def parse_args():
     parser.add_argument(
         '--bus', '-b', help='bus name', default='org.freedesktop.secrets'
     )
+    parser.add_argument(
+        '--socket',
+        help='socket path',
+        type=Path,
+        default=None,
+    )
     return parser.parse_args()
 
 
@@ -66,5 +73,6 @@ elif args.action == 'change-password':
     write_bytes(args.key, encrypted)
 else:
     with DBusService(keyring).own(args.bus):
-        loop = GLib.MainLoop()
-        loop.run()
+        with SocketService(keyring).listen(args.socket):
+            loop = GLib.MainLoop()
+            loop.run()

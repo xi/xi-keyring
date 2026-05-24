@@ -1,0 +1,8 @@
+[Unit]
+Description=xi keyring
+
+[Socket]
+ListenStream=%t/xi.portal.Secret
+
+[Install]
+WantedBy=sockets.target
