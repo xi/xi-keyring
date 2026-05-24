@@ -11,10 +11,6 @@ from . import crypto
 from .kernel_keyring import KernelKey
 from .prompt import PinentryPrompt as Prompt
 
-TRUSTED_MANAGERS = [
-    '/usr/bin/seahorse',
-]
-
 
 class AccessDeniedError(Exception):
     pass
@@ -125,15 +121,12 @@ class Keyring:
         if not self.prompt.confirm(f'Allow {app_id or "host"} to make changes to your keyring?'):
             raise AccessDeniedError
 
-    def has_access(self, app_id: str, item: Item) -> bool:
-        return item.app_id == app_id or app_id in TRUSTED_MANAGERS
-
     def get(self, items: dict[int, Item], app_id: str, id: int) -> Item:
         try:
             item = items[id]
         except KeyError as e:
             raise NotFoundError from e
-        if not self.has_access(app_id, item):
+        if item.app_id != app_id:
             raise NotFoundError
         return item
 
@@ -141,7 +134,7 @@ class Keyring:
         items = self._read()
         return [
             id for id, item in items.items()
-            if self.has_access(app_id, item) and all(
+            if item.app_id == app_id and all(
                 item.attributes.get(key) == value for key, value in query.items()
             )
         ]
