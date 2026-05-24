@@ -27,9 +27,11 @@ class Item:
     attributes: dict[str, str]
 
 
-def write_bytes(path: Path, data: bytes) -> int:
+def write_bytes(path: Path, data: bytes, pid: PID | None = None) -> int:
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
     fd = os.open(path, flags, mode=0o600)
+    if pid:
+        pid.check_active()
     try:
         return os.write(fd, data)
     finally:
@@ -88,10 +90,12 @@ class Keyring:
         return KernelKey(key)
 
     def _read(self, pid: PID) -> dict[int, Item]:
-        if not self.path.exists():
+        path = pid.path(self.path)
+        if not path.exists():
             return {}
 
-        encrypted = self.path.read_bytes()
+        encrypted = path.read_bytes()
+        pid.check_active()
         decrypted = Fernet(self.key.value).decrypt(encrypted)
         raw = json.loads(decrypted)
         return {
@@ -100,6 +104,12 @@ class Keyring:
         }
 
     def _write(self, pid: PID, items: dict[int, Item]):
+        path = pid.path(self.path)
+        if not path.parent.exists():
+            # Raise an error instead of creating the directory because this
+            # might be a tmpfs.
+            raise NotFoundError
+
         raw = [
             (
                 id,
@@ -110,7 +120,7 @@ class Keyring:
         ]
         decrypted = json.dumps(raw).encode('utf-8')
         encrypted = Fernet(self.key.value).encrypt(decrypted)
-        write_bytes(self.path, encrypted)
+        write_bytes(path, encrypted, pid)
 
     def confirm_access(self) -> None:
         if not self.prompt.confirm('Allow access to a secret from your keyring?'):
