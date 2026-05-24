@@ -22,14 +22,9 @@ def get_data_home():
 def parse_args():
     parser = argparse.ArgumentParser('xikeyring')
     parser.add_argument(
-        '--dump',
-        help='print the decryted file and exit',
-        action='store_true',
-    )
-    parser.add_argument(
-        '--restore',
-        help='inverse of --dump',
-        action='store_true',
+        'action',
+        choices=['dump', 'restore'],
+        nargs='?',
     )
     parser.add_argument(
         '--store',
@@ -55,11 +50,11 @@ pr_set(dumpable=False)
 
 args = parse_args()
 keyring = KeyringProxy(args.store, args.key)
-if args.dump:
+if args.action == 'dump':
     encrypted = keyring.path.read_bytes()
     decrypted = Fernet(keyring.key.value).decrypt(encrypted)
     print(decrypted.decode('utf-8'))
-elif args.restore:
+elif args.action == 'restore':
     decrypted = sys.stdin.read().encode('utf-8')
     encrypted = Fernet(keyring.key.value).encrypt(decrypted)
     write_bytes(keyring.path, encrypted)
