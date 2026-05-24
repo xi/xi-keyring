@@ -1,54 +1,58 @@
 # xi keyring
 
-a simple and extensible alternative for gnome-keyring.
+A simple and extensible alternative to gnome-keyring that implements
+the
+[`org.freedesktop.Secret`](https://specifications.freedesktop.org/secret-service/)
+DBus interface and the [XDG Desktop Portal Secrets
+backend](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.impl.portal.Secret.html)
+as well as a simple JSON socket interface.
 
-gnome-keyring is tightly integrated into the linux desktop. There are many
+## Design
+
+### Focus on Experimentation
+
+gnome-keyring is tightly integrated into the Linux desktop. There are many
 other password managers with interesting features. Just to name a few:
 [KeePassXC](https://github.com/keepassxreboot/keepassxc),
 [Bitwarden](https://bitwarden.com), [pass](https://www.passwordstore.org/), and
-[Himitsu](https://sr.ht/~sircmpwn/himitsu/). Unfortunately, none of them really
-implement the `org.freedesktop.Secrets` dbus specification, so they cannot
-completely replace gnome-keyring. On the other hand, gnome-keyring itself has
-accumulated a sizable legacy, which makes it very hard to extend.
+[Himitsu](https://sr.ht/~sircmpwn/himitsu/). However, they do not all implement
+the `org.freedesktop.Secret` interface, so they cannot be used as drop-in
+replacements. On the other hand, gnome-keyring is so big and complex that it is
+hard to experiment with new features.
 
-So this project tries to fill the gap:
+The main focus of this project is to provide a simple code base that makes it
+easy to experiment with new features. While the result is usable, the focus is
+on experimentation rather than providing a complete product.
 
--   Work as a drop-in replacement for gnome-keyring for most common use cases
--   Keep the code simple and extensible
--   Experiment with new features
+### Limit access to secrets
 
-## Threat model
-
-*As the main focus for now is experimentation, there is no fixed threat model
-yet. There are some ideas though.*
-
-With gnome-keyring, secrets in an unlocked collection can be read by a
-malicious application that is running on the user's desktop. This does startle
-some users, but the developers have repeatedly explained that [there is just no
-point in trying to protect against malicious un-sandboxed
+With gnome-keyring, secrets in an unlocked collection can be read by any
+application that has access to the session bus. This does startle some users,
+but the developers have repeatedly explained that [there is just no point in
+trying to protect against malicious un-sandboxed
 applications](https://gitlab.gnome.org/GNOME/gnome-keyring/-/issues/5#note_1876550).
 
-While I am very critical of security theater myself, I feel like there is room
-for nuance here. These are some of the **ideas** I want to experiment with:
+While I understand the sentiment, I feel like there is room for nuance here.
+These are some of the mechanisms xi-keyring uses to limit access to secrets:
 
--   Prompt the user when an application tries to access a password to provide some degree of observability
--   Prevent malicious applications from taking memory dumps by using [`PR_SET_DUMPABLE`](https://www.man7.org/linux/man-pages/man2/prctl.2.html)
--   Use a yubikey to store the encryption secret off-device
--   Allow to configure access rules (always allow, always deny, prompt) per application
--   Encrypt the meta data
--   Keep the keyring locked as much as possible without impacting user comfort too much. For example, don't unlock automatically on login.
--   Use separate namespaces for different applications, so one application can not access the secrets stored by another.
+-   Prompt the user when an application tries to access a password to provide
+    some degree of observability.
+-   Prevent malicious applications from taking memory dumps by using
+    [`PR_SET_DUMPABLE`](https://www.man7.org/linux/man-pages/man2/prctl.2.html)
+-   Keep the keyring locked as much as possible without impacting user comfort
+    too much. For example, don't unlock automatically on login.
+-   Allow to use different namespaces for different applications (see below for
+    details)
 
-**I am not claiming that this is or ever will be more secure than
-gnome-keyring.** The gnome-keyring developers are much more experienced with
-this stuff than I am. For example, they have put a lot of effort into
-preventing secrets from being swapped to disk. That is not something I am even
-considering (partially because I rely on full disk encryption).
+Of course, a malicious application that is completely unrestricted can still
+work around these measures, e.g. by starting a modified keyring implementation.
+However, the amount of sandboxing necessary with these restrictions already in
+place is greatly reduced.
 
-## Deviations from the dbus specification
+### Compatibility with DBus interface
 
 While this project aims to be a drop-in replacement for gnome-keyring, some
-features of the `org.freedesktop.Secrets` specification have been simplified:
+features of the `org.freedesktop.Secrets` interface have been simplified:
 
 -   There is only a single collection (called "it")
     -   Trying to create or delete a collection fails
@@ -60,3 +64,53 @@ features of the `org.freedesktop.Secrets` specification have been simplified:
 -   Prompts are transparent for the caller. No prompt is ever returned
 -   Labels are generated automatically and cannot be changed
 -   `Created`/`Modified` is always 0
+
+### Compatibility with XDG Desktop Portal
+
+It took me a while to understand the Secret Desktop Portal. When it finally
+clicked I wrote a [blog
+post](https://blog.ce9e.org/posts/2024-07-27-password-plan/) about it.
+
+The main idea is that the backend only stores a single key for each
+applications, and the application uses that key to encrypt its own secrets.
+
+Applications that are sandboxed with flatpak can reliably be identified by this
+mechanism. However, application running on the host can identify an arbitrary
+app ID using the [Registry
+portal](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.host.portal.Registry.html).
+
+### Simple socket interface
+
+One major downside of DBus is that all services share a single socket. This
+means that a mount namespace has either access to all service, no services at
+all, or it has to use
+[xdg-dbus-proxy](https://github.com/flatpak/xdg-dbus-proxy).
+
+From this perspective, using one socket per service is a much better approach.
+That is the basic idea of
+[xi-desktop-portals](https://github.com/xi/xi-desktop-portals). For the
+keyring, a socket is available at `$XDG_RUNTIME_DIR/xi.portal.Secret`.
+
+A client is included in `scripts/socket_client.py`. It has an interface similar
+to the [keyring CLI](https://github.com/jaraco/keyring).
+
+### Namespacing
+
+xi-keyring loads the keys from a file in the client's mount namespace. This
+makes it easy to give each application its own set of secrets. Simply mount a
+different folder into `$XDG_DATA_HOME/xikeyring/`. *The mount namespace is the
+secret namespace.*
+
+However, you need to be careful when using proxies:
+
+-   With flatpak, `xdg-dbus-proxy` is the immediate client, and it has full
+    access to `$XDG_DATA_HOME`.
+-   With portal APIs, `xdg-desktop-portal` is the immediate client, and it has
+    full access to `$XDG_DATA_HOME`.
+
+When using flatpak, I recommend using the portal APIs and their namespacing
+based in app IDs.
+
+With other sandboxing mechanisms, I recommend using the socket interface
+because it allows to nest different sandboxes inside of each other and does not
+require a separate proxy process.
