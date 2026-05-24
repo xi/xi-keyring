@@ -33,6 +33,7 @@ def parse_args():
         '--store',
         '-s',
         help='path to the store file',
+        type=Path,
         default=get_data_home() / 'xikeyring.db',
     )
     parser.add_argument(
@@ -46,8 +47,7 @@ pr_set(dumpable=False)
 args = parse_args()
 keyring = KeyringProxy(args.store)
 if args.dump:
-    with open(keyring.path, 'rb') as fh:
-        encrypted = fh.read()
+    encrypted = keyring.path.read_bytes()
     decrypted = keyring.crypt.decrypt(encrypted)
     print(decrypted.decode('utf-8'))
 elif args.restore:

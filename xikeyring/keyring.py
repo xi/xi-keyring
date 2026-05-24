@@ -2,6 +2,7 @@ import base64
 import json
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 import argon2
 from cryptography.fernet import Fernet
@@ -30,7 +31,7 @@ class Item:
     app_id: str
 
 
-def write_bytes(path: str, data: bytes) -> int:
+def write_bytes(path: Path, data: bytes) -> int:
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
     fd = os.open(path, flags, mode=0o600)
     try:
@@ -88,11 +89,11 @@ class Crypt:
 
 
 class Keyring:
-    def __init__(self, path: str):
+    def __init__(self, path: Path):
         self.path = path
         self.prompt = Prompt()
 
-        if os.path.exists(self.path):
+        if self.path.exists():
             while True:
                 self.crypt = self._get_crypt()
                 try:
@@ -114,8 +115,7 @@ class Keyring:
         return Crypt(password)
 
     def _read(self) -> dict[int, Item]:
-        with open(self.path, 'rb') as fh:
-            encrypted = fh.read()
+        encrypted = self.path.read_bytes()
         decrypted = self.crypt.decrypt(encrypted)
         raw = json.loads(decrypted)
         return {
@@ -206,7 +206,7 @@ class Keyring:
 
 
 class KeyringProxy:
-    def __init__(self, path):
+    def __init__(self, path: Path):
         self.path = path
         self.keyring = None
 
