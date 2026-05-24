@@ -3,7 +3,8 @@ import os
 import sys
 from pathlib import Path
 
-from . import crypto
+from cryptography.fernet import Fernet
+
 from .dbus import DBusService
 from .dumpable import pr_set
 from .keyring import KeyringProxy
@@ -35,7 +36,14 @@ def parse_args():
         '-s',
         help='path to the store file',
         type=Path,
-        default=get_data_home() / 'xikeyring.db',
+        default=get_data_home() / 'xikeyring' / 'store',
+    )
+    parser.add_argument(
+        '--key',
+        '-k',
+        help='path to the key file',
+        type=Path,
+        default=get_data_home() / 'xikeyring' / 'key',
     )
     parser.add_argument(
         '--bus', '-b', help='bus name', default='org.freedesktop.secrets'
@@ -46,14 +54,14 @@ def parse_args():
 pr_set(dumpable=False)
 
 args = parse_args()
-keyring = KeyringProxy(args.store)
+keyring = KeyringProxy(args.store, args.key)
 if args.dump:
     encrypted = keyring.path.read_bytes()
-    decrypted = crypto.decrypt_with_password(encrypted, keyring.password.value)
+    decrypted = Fernet(keyring.key.value).decrypt(encrypted)
     print(decrypted.decode('utf-8'))
 elif args.restore:
     decrypted = sys.stdin.read().encode('utf-8')
-    encrypted = crypto.encrypt_with_password(decrypted, keyring.password.value)
+    encrypted = Fernet(keyring.key.value).encrypt(decrypted)
     write_bytes(keyring.path, encrypted)
 else:
     service = DBusService(keyring)

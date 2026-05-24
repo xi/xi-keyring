@@ -4,6 +4,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from cryptography.fernet import Fernet
 from cryptography.fernet import InvalidToken
 
 from . import crypto
@@ -40,34 +41,48 @@ def write_bytes(path: Path, data: bytes) -> int:
 
 
 class Keyring:
-    def __init__(self, path: Path):
-        self.path = path
+    def __init__(self, store_path: Path, key_path: Path):
+        self.path = store_path
         self.prompt = Prompt()
 
-        if self.path.exists():
-            while True:
-                self.password = self._get_password()
-                try:
-                    self._read()
-                    break
-                except InvalidToken:
-                    pass
+        if key_path.exists():
+            self.key = self._get_key(key_path)
         else:
-            self.password = self._get_password()
-            self._write({})
+            self.key = self._create_key(key_path)
 
-    def _get_password(self):
-        # TODO: different messages for create|unlock|retry
+    def _get_key(self, path: Path) -> KernelKey:
+        encrypted = path.read_bytes()
+        while True:
+            password = self.prompt.get_password(
+                'An application wants access to your keyring, but it is locked.'
+            )
+            if not password:
+                raise AccessDeniedError
+            try:
+                key = crypto.decrypt_with_password(encrypted, password)
+                return KernelKey(key)
+            except InvalidToken:
+                pass
+
+    def _create_key(self, path: Path) -> KernelKey:
         password = self.prompt.get_password(
-            'An application wants access to your keyring, but it is locked'
+            'An application wants access to your keyring. '
+            'Please enter a password to create a keyring.'
         )
         if not password:
             raise AccessDeniedError
-        return KernelKey(password)
+        key = Fernet.generate_key()
+        encrypted = crypto.encrypt_with_password(key, password)
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        write_bytes(path, encrypted)
+        return KernelKey(key)
 
     def _read(self) -> dict[int, Item]:
+        if not self.path.exists():
+            return {}
+
         encrypted = self.path.read_bytes()
-        decrypted = crypto.decrypt_with_password(encrypted, self.password.value)
+        decrypted = Fernet(self.key.value).decrypt(encrypted)
         raw = json.loads(decrypted)
         return {
             id: Item(base64.urlsafe_b64decode(secret), attributes, app_id)
@@ -85,7 +100,7 @@ class Keyring:
             for id, item in items.items()
         ]
         decrypted = json.dumps(raw).encode('utf-8')
-        encrypted = crypto.encrypt_with_password(decrypted, self.password.value)
+        encrypted = Fernet(self.key.value).encrypt(decrypted)
         write_bytes(self.path, encrypted)
 
     def confirm_access(self, app_id: str) -> None:
@@ -157,8 +172,8 @@ class Keyring:
 
 
 class KeyringProxy:
-    def __init__(self, path: Path):
-        self.path = path
+    def __init__(self, *args):
+        self.args = args
         self.keyring = None
 
     def lock(self):
@@ -166,5 +181,5 @@ class KeyringProxy:
 
     def __getattr__(self, attr):
         if self.keyring is None:
-            self.keyring = Keyring(self.path)
+            self.keyring = Keyring(*self.args)
         return getattr(self.keyring, attr)
