@@ -382,13 +382,16 @@ class DBusService(BaseDBusService):
         try:
             if self.get_app_id(conn, sender):
                 raise AccessDeniedError
-            attrs = {'application': 'org.freedesktop.portal.Secret'}
-            ids = self.keyring.search_items(app_id, attrs)
+            attrs = {
+                'application': 'org.freedesktop.portal.Secret',
+                'app_id': app_id,
+            }
+            ids = self.keyring.search_items('', attrs)
             if ids:
-                secret = self.keyring.get_secret(app_id, ids[0])
+                secret = self.keyring.get_secret('', ids[0])
             else:
                 secret = os.urandom(64)
-                self.keyring.create_item(app_id, attrs, secret)
+                self.keyring.create_item('', attrs, secret)
             os.write(fd, secret)
             os.close(fd)
         finally:
