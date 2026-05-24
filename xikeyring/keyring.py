@@ -113,12 +113,12 @@ class Keyring:
         encrypted = Fernet(self.key.value).encrypt(decrypted)
         write_bytes(self.path, encrypted)
 
-    def confirm_access(self, app_id: str) -> None:
-        if not self.prompt.confirm(f'Allow {app_id or "host"} to access a secret from your keyring?'):
+    def confirm_access(self) -> None:
+        if not self.prompt.confirm('Allow access to a secret from your keyring?'):
             raise AccessDeniedError
 
-    def confirm_change(self, app_id: str) -> None:
-        if not self.prompt.confirm(f'Allow {app_id or "host"} to make changes to your keyring?'):
+    def confirm_change(self) -> None:
+        if not self.prompt.confirm('Allow changes to your keyring?'):
             raise AccessDeniedError
 
     def get(self, items: dict[int, Item], app_id: str, id: int) -> Item:
@@ -146,7 +146,7 @@ class Keyring:
     def get_secret(self, app_id: str, id: int) -> bytes:
         items = self._read()
         item = self.get(items, app_id, id)
-        self.confirm_access(app_id)
+        self.confirm_access()
         return item.secret
 
     def create_item(self, app_id: str, attributes: dict[str, str], secret: bytes) -> int:
@@ -159,21 +159,21 @@ class Keyring:
     def update_attributes(self, app_id: str, id: int, attributes: dict[str, str]) -> None:
         items = self._read()
         item = self.get(items, app_id, id)
-        self.confirm_change(app_id)
+        self.confirm_change()
         item.attributes = attributes
         self._write(items)
 
     def update_secret(self, app_id: str, id: int, secret: bytes) -> None:
         items = self._read()
         item = self.get(items, app_id, id)
-        self.confirm_change(app_id)
+        self.confirm_change()
         item.secret = secret
         self._write(items)
 
     def delete_item(self, app_id: str, id: int) -> None:
         items = self._read()
         self.get(items, app_id, id)  # trigger appropriate exceptions
-        self.confirm_change(app_id)
+        self.confirm_change()
         del items[id]
         self._write(items)
 
