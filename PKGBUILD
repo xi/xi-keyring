@@ -20,4 +20,5 @@ package() {
 	install -Dm 644 system/systemd.service "$pkgdir/usr/lib/systemd/user/xi-keyring.service"
 	install -Dm 644 system/systemd.socket "$pkgdir/usr/lib/systemd/user/xi-keyring.socket"
 	install -Dm 644 system/portal "$pkgdir/usr/share/xdg-desktop-portal/portals/xi-keyring.portal"
+	install -Dm 755 scripts/socket_client.py "$pkgdir/usr/bin/xikeyring"
 }
