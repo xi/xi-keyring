@@ -30,15 +30,37 @@ class PID:
                 raise ValueError('Calling process has quit')
 
     def path(self, path: str | Path) -> Path:
-        root = (Path('/proc') / str(self.pid) / 'root').resolve()
-        rel_path = Path(path).absolute().relative_to('/')
-        result = (root / rel_path).resolve()
-
-        # FIXME: symlinks are resoled relative to the host.
+        # openat2() is not available in python.
         #
-        # A proper fix would involve openat2()
-        # (see https://github.com/python/cpython/issues/141878).
-        if root not in result.parents:
-            raise ValueError('path escapes mount namespace')
+        # Also, /proc/pid/root/ is a pseudo-symlink to /, so calling
+        # resolve() will just return the host path.
+        #
+        # Instead, we have to carefully resolve the path ourselves.
+
+        root = Path('/proc') / str(self.pid) / 'root'
+        result = root
+        parts = list(Path(path).absolute().relative_to('/').parts)
+        visited_symlinks = set()
+
+        while parts:
+            part = parts.pop(0)
+            result = result / part
+
+            if part == '..':
+                result = result.parent.parent
+                if root not in result.parents:
+                    raise ValueError('mount namespace escape')
+            elif result.is_symlink():
+                if result in visited_symlinks:
+                    raise ValueError('circular symlinks')
+                visited_symlinks.add(result)
+
+                link = result.readlink()
+                if link.is_absolute():
+                    result = root
+                    parts = [*link.relative_to('/').parts, *parts]
+                else:
+                    result = root.parent
+                    parts = [*link.parts, *parts]
 
         return result
