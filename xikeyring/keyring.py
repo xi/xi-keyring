@@ -10,7 +10,7 @@ from cryptography.fernet import InvalidToken
 from . import crypto
 from .kernel_keyring import KernelKey
 from .pidfd import PID
-from .prompt import PinentryPrompt as Prompt
+from .prompt import SSHAskPassPrompt as Prompt
 
 
 class AccessDeniedError(Exception):

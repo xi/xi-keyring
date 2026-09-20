@@ -71,6 +71,23 @@ class PinentryPrompt:
             return success
 
 
+class SSHAskPassPrompt:
+    def get_password(self, desc: str) -> bytes | None:
+        proc = subprocess.run(
+            ['ssh-askpass', desc],
+            capture_output=True,
+        )
+        if proc.returncode == 0:
+            return proc.stdout.rstrip(b'\n')
+
+    def confirm(self, desc: str) -> bool:
+        proc = subprocess.run(
+            ['ssh-askpass', desc],
+            env={**os.environ, 'SSH_ASKPASS_PROMPT': 'confirm'},
+        )
+        return proc.returncode == 0
+
+
 class DummyPrompt:
     def get_password(self, desc):
         return b'password'
