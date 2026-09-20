@@ -13,7 +13,11 @@ def socket_send(data: bytes, path: Path) -> bytes:
     try:
         sock.connect(str(path))
         sock.sendall(data)
-        return sock.recv(1024):
+        sock.shutdown(socket.SHUT_WR)
+        response = b''
+        while chunk := sock.recv(1024):
+            response += chunk
+        return response
     finally:
         sock.close()
 
