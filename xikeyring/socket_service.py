@@ -28,6 +28,7 @@ class Connection:
         self.sock = sock
         self.keyring = keyring
         self.pid = PID.from_socket(sock)
+        self.buffer = b''
         watch(sock, self.on_io)
 
     def get_id(self, query):
@@ -64,10 +65,13 @@ class Connection:
             return False
         chunk = sock.recv(1024)
         if chunk:
-            # TODO buffer
+            self.buffer += chunk
             try:
-                msg = json.loads(chunk)
+                msg = json.loads(self.buffer)
+                self.buffer = b''
                 reply = self.on_msg(msg)
+            except json.JSONDecodeError:
+                return True
             except AccessDeniedError:
                 reply = {'error': 'access denied'}
             except NotFoundError:
