@@ -109,7 +109,7 @@ However, you need to be careful when using proxies:
     full access to `$XDG_DATA_HOME`.
 
 When using flatpak, I recommend using the portal APIs and their namespacing
-based in app IDs.
+based on app IDs.
 
 With other sandboxing mechanisms, I recommend using the socket interface
 because it allows to nest different sandboxes inside of each other and does not
